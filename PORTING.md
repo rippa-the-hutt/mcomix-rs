@@ -50,7 +50,7 @@ rust/
 | `image_tools.py` | `image_loader.rs` | ✅ core; enhancers ⏳ |
 | `zoom.py` | `zoom.rs` | ✅ core |
 | `layout.py` + `scrolling.py` (smart scroll) | `app.rs` (percentage smart scroll) | 🟡 basic smart scroll; full layout engine later |
-| `thumbbar.py`, `thumbnail_tools.py` | `app.rs` + `thumb_cache.rs` | ✅ parallel + gdk-pixbuf scaled decode + on-disk cache; ⏳ lazy/windowed generation (see roadmap) |
+| `thumbbar.py`, `thumbnail_tools.py` | `app.rs` + `thumb_cache.rs` | ✅ lazy/windowed generation, gdk-pixbuf scaled decode, on-disk cache, page-decode priority |
 | `slideshow.py` | `app.rs` | ✅ basic |
 | `preferences.py` | `prefs.rs` | ✅ (JSON, same keys) |
 | `preferences_dialog.py` | `prefs_dialog.rs` | ✅ (Appearance/Behaviour/Display/Scrolling/Shortcuts tabs) |
@@ -123,16 +123,10 @@ Windows notes:
 
 ## What's next (suggested order)
 
-1. **Lazy thumbnail generation** — mimic the Python `thumbbar`: decode
-   thumbnails only for the pages near the current page and those visible in
-   the thumbnail viewport (re-requesting as it scrolls), instead of decoding
-   the whole comic in one CPU burst. Suspend/slow thumbnail work while a page
-   decode is in flight so navigation always gets the CPU first. Keeps the
-   existing gdk-pixbuf scaled decode + on-disk cache.
-2. **Bookmarks** (serde JSON; port `bookmark_backend.py` + dialogs).
-3. **Library** (rusqlite backend; port `mcomix/library/*`).
-4. **Recursive archives, image enhancement, magnifying lens, OSD, openwith.**
-5. **i18n** (reuse the existing `.po` files via gettext-rs).
-6. **AppImage** for a truly standalone Linux distribution.
-7. **PDF polish**: port the optimal-DPI trace pass from `pdf_external.py`.
-8. **Full smart-scroll layout engine** (port `layout.py`/`scrolling.py` box model).
+1. **Bookmarks** (serde JSON; port `bookmark_backend.py` + dialogs).
+2. **Library** (rusqlite backend; port `mcomix/library/*`).
+3. **Recursive archives, image enhancement, magnifying lens, OSD, openwith.**
+4. **i18n** (reuse the existing `.po` files via gettext-rs).
+5. **AppImage** for a truly standalone Linux distribution.
+6. **PDF polish**: port the optimal-DPI trace pass from `pdf_external.py`.
+7. **Full smart-scroll layout engine** (port `layout.py`/`scrolling.py` box model).
