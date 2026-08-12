@@ -46,10 +46,10 @@ rust/
 | `archive/lha_external.py` | `archive/lha.rs` | ✅ done (external 7z, `lha` fallback) |
 | `archive/pdf_external.py` | `archive/pdf.rs` | ✅ done (mutool; fixed 216 DPI) |
 | `archive_recursive.py` (archive-in-archive) | — | ⏳ later |
-| `image_handler.py` (cache, prefetch) | `app.rs` (2-page cache only) | 🟡 partial; add LRU prefetch |
+| `image_handler.py` (cache, prefetch) | `app.rs` + `lru.rs` | ✅ LRU page cache (`max pages to cache`) + background prefetch |
 | `image_tools.py` | `image_loader.rs` | ✅ core; enhancers ⏳ |
 | `zoom.py` | `zoom.rs` | ✅ core |
-| `layout.py` + `scrolling.py` (smart scroll) | `app.rs` (simple scroll) | 🟡 partial; port smart-scroll |
+| `layout.py` + `scrolling.py` (smart scroll) | `app.rs` (percentage smart scroll) | 🟡 basic smart scroll; full layout engine later |
 | `thumbbar.py`, `thumbnail_tools.py` | `app.rs` async thumbnails | ✅ basic |
 | `slideshow.py` | `app.rs` | ✅ basic |
 | `preferences.py` | `prefs.rs` | ✅ (JSON, same keys) |
@@ -123,12 +123,11 @@ Windows notes:
 
 ## What's next (suggested order)
 
-1. **Smart scrolling + page cache** (prefetch next/prev pages in a worker;
-   LRU of ~7 decoded pages like `max pages to cache`).
-2. **Preferences dialog + keybinding editor** (mirror `preferences_dialog.py`).
-3. **Bookmarks** (serde JSON; port `bookmark_backend.py` + dialogs).
-4. **Library** (rusqlite backend; port `mcomix/library/*`).
-5. **Recursive archives, image enhancement, magnifying lens, OSD, openwith.**
-6. **i18n** (reuse the existing `.po` files via gettext-rs).
-7. **AppImage** for a truly standalone Linux distribution.
-8. **PDF polish**: port the optimal-DPI trace pass from `pdf_external.py`.
+1. **Preferences dialog + keybinding editor** (mirror `preferences_dialog.py`).
+2. **Bookmarks** (serde JSON; port `bookmark_backend.py` + dialogs).
+3. **Library** (rusqlite backend; port `mcomix/library/*`).
+4. **Recursive archives, image enhancement, magnifying lens, OSD, openwith.**
+5. **i18n** (reuse the existing `.po` files via gettext-rs).
+6. **AppImage** for a truly standalone Linux distribution.
+7. **PDF polish**: port the optimal-DPI trace pass from `pdf_external.py`.
+8. **Full smart-scroll layout engine** (port `layout.py`/`scrolling.py` box model).

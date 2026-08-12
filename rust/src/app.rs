@@ -34,12 +34,19 @@ enum ScrollDest {
 
 /// Command for the background page-decoding worker.
 struct PageCmd {
+    /// Display requests only: incremented per display push; results with an
+    /// older id are dropped.
     req: u64,
+    /// Archive generation (bumped when a new file is opened).
     gen: u64,
+    /// Prefetch generation (bumped when transforms invalidate the cache).
+    pgen: u64,
+    /// True for display requests, false for background prefetch.
+    display: bool,
     path: PathBuf,
     pages: Vec<String>,
-    /// (display slot, page index) pairs to decode for the current spread.
-    slots: Vec<(usize, usize)>,
+    /// Page indices to decode.
+    indices: Vec<usize>,
     rotation: i32,
     flip_h: bool,
     flip_v: bool,
@@ -47,7 +54,7 @@ struct PageCmd {
 
 /// One decoded page, ready to be turned into a texture on the main thread.
 struct DecodedPage {
-    slot: usize,
+    idx: usize,
     w: u32,
     h: u32,
     rgba: Vec<u8>,
@@ -56,6 +63,8 @@ struct DecodedPage {
 struct PageResult {
     req: u64,
     gen: u64,
+    pgen: u64,
+    display: bool,
     pages: Vec<DecodedPage>,
 }
 
@@ -101,16 +110,25 @@ pub struct AppState {
     /// True while a decode request is in flight (used to coalesce navigation).
     pub page_loading: bool,
     /// Coalesced newest request while a decode is still running.
-    pub page_pending: Option<Vec<(usize, usize)>>,
+    pub page_pending: Option<Vec<usize>>,
     /// Scroll destination to apply when the pending page actually displays.
     pub page_dest: Option<ScrollDest>,
     /// Last time the last-read position was persisted (throttled).
     pub last_save: Option<std::time::Instant>,
+    /// LRU cache of decoded page textures (mirrors `max pages to cache`).
+    pub cache: crate::lru::LruCache<usize, (gdk::Texture, u32, u32)>,
+    /// Pages to prefetch in the background, in priority order.
+    pub prefetch_queue: std::collections::VecDeque<usize>,
+    /// True while a prefetch decode is in flight.
+    pub prefetching: bool,
+    /// Bumped when transforms invalidate the cache (stale prefetches dropped).
+    pub prefetch_gen: u64,
 }
 
 impl Default for AppState {
     fn default() -> Self {
         let prefs = Prefs::load();
+        let cache_capacity = prefs.max_pages_to_cache.max(1) as usize;
         AppState {
             archive: None,
             path: None,
@@ -146,6 +164,13 @@ impl Default for AppState {
             page_pending: None,
             page_dest: None,
             last_save: None,
+            cache: crate::lru::LruCache::new(
+                cache_capacity,
+                384 * 1024 * 1024, // ~384 MB of decoded pages
+            ),
+            prefetch_queue: std::collections::VecDeque::new(),
+            prefetching: false,
+            prefetch_gen: 0,
         }
     }
 }
@@ -420,8 +445,8 @@ impl Ui {
                     }
                     let mut out = Vec::new();
                     if let Some(ar) = ar.as_mut() {
-                        for (slot, idx) in &cmd.slots {
-                            if let Some(name) = cmd.pages.get(*idx) {
+                        for &idx in &cmd.indices {
+                            if let Some(name) = cmd.pages.get(idx) {
                                 if let Ok(bytes) = ar.read(name) {
                                     if let Ok(img) = image_loader::decode_rgba(&bytes) {
                                         let img = image_loader::transform(
@@ -432,7 +457,7 @@ impl Ui {
                                         );
                                         let (w, h) = img.dimensions();
                                         out.push(DecodedPage {
-                                            slot: *slot,
+                                            idx,
                                             w,
                                             h,
                                             rgba: img.into_raw(),
@@ -446,6 +471,8 @@ impl Ui {
                         .send(PageResult {
                             req: cmd.req,
                             gen: cmd.gen,
+                            pgen: cmd.pgen,
+                            display: cmd.display,
                             pages: out,
                         })
                         .is_err()
@@ -1030,9 +1057,13 @@ impl Ui {
                         self.state.path = Some(path.clone());
                         // Invalidate any in-flight decode of the previous file.
                         self.state.page_gen += 1;
+                        self.state.prefetch_gen += 1;
                         self.state.page_loading = false;
                         self.state.page_pending = None;
                         self.state.page_dest = None;
+                        self.state.prefetching = false;
+                        self.state.prefetch_queue.clear();
+                        self.state.cache.clear();
                         self.state.textures = vec![None, None];
                         self.state.sizes = vec![(0, 0), (0, 0)];
                         self.window.set_title(Some(&format!("{name} — MComix3")));
@@ -1065,61 +1096,90 @@ impl Ui {
         if n == 0 {
             return;
         }
-        let idx1 = self.state.page;
-        let mut slots = vec![(0usize, idx1)];
+        let mut indices = vec![self.state.page];
         if self.state.double_page && n > 1 {
-            slots.push((1, (idx1 + 1).min(n - 1)));
+            indices.push((self.state.page + 1).min(n - 1));
         }
         self.state.page_dest = Some(dest);
-        self.push_load(slots);
+        self.push_load(indices, true);
     }
 
-    fn push_load(&mut self, slots: Vec<(usize, usize)>) {
+    fn push_load(&mut self, indices: Vec<usize>, display: bool) {
         let Some(tx) = self.state.page_loader_tx.clone() else {
             return;
         };
-        if self.state.page_loading {
-            self.state.page_pending = Some(slots);
+        if display && self.state.page_loading {
+            self.state.page_pending = Some(indices);
             return;
         }
         let Some(path) = self.state.path.clone() else {
             return;
         };
         let pages = self.state.pages.clone();
-        self.state.page_req += 1;
+        if display {
+            self.state.page_req += 1;
+        }
         let cmd = PageCmd {
             req: self.state.page_req,
             gen: self.state.page_gen,
+            pgen: self.state.prefetch_gen,
+            display,
             path,
             pages,
-            slots,
+            indices,
             rotation: self.state.rotation,
             flip_h: self.state.flip_h,
             flip_v: self.state.flip_v,
         };
-        self.state.page_loading = true;
+        if display {
+            self.state.page_loading = true;
+        } else {
+            self.state.prefetching = true;
+        }
         if tx.send(cmd).is_err() {
-            self.state.page_loading = false;
+            if display {
+                self.state.page_loading = false;
+            } else {
+                self.state.prefetching = false;
+            }
         }
     }
 
     fn apply_page_result(&mut self, res: PageResult) {
+        if !res.display {
+            // Prefetch result: fill the cache only.
+            if res.gen != self.state.page_gen || res.pgen != self.state.prefetch_gen {
+                self.state.prefetching = false;
+                self.pump_prefetch();
+                return;
+            }
+            for p in res.pages {
+                self.cache_decoded(p);
+            }
+            self.state.prefetching = false;
+            self.pump_prefetch();
+            return;
+        }
+
         self.state.page_loading = false;
         // Drop results that are stale (old archive) or superseded by a newer
         // navigation/transform request.
         if res.gen != self.state.page_gen || res.req != self.state.page_req {
             if let Some(p) = self.state.page_pending.take() {
-                self.push_load(p);
+                self.push_load(p, true);
             }
             return;
         }
         self.state.textures = vec![None, None];
         self.state.sizes = vec![(0, 0), (0, 0)];
         for p in res.pages {
-            if let Some(img) = image::RgbaImage::from_raw(p.w, p.h, p.rgba) {
-                let tex = image_loader::texture_from_rgba(&img);
-                self.state.textures[p.slot] = Some(tex);
-                self.state.sizes[p.slot] = (p.w, p.h);
+            let idx = p.idx;
+            // Map the page index back to its display slot (0 or 1).
+            if let Some((tex, w, h)) = self.cache_decoded(p) {
+                if idx >= self.state.page && idx - self.state.page < 2 {
+                    self.state.textures[idx - self.state.page] = Some(tex);
+                    self.state.sizes[idx - self.state.page] = (w, h);
+                }
             }
         }
         self.redraw_force();
@@ -1128,8 +1188,85 @@ impl Ui {
         }
         self.record_position();
         if let Some(p) = self.state.page_pending.take() {
-            self.push_load(p);
+            self.push_load(p, true);
         }
+        self.do_caching();
+    }
+
+    /// Turn a decoded page into a texture and store it in the LRU cache.
+    /// Returns `None` if the page could not be decoded (nothing is cached).
+    fn cache_decoded(&mut self, p: DecodedPage) -> Option<(gdk::Texture, u32, u32)> {
+        let (w, h) = (p.w, p.h);
+        let img = image::RgbaImage::from_raw(p.w, p.h, p.rgba)?;
+        let tex = image_loader::texture_from_rgba(&img);
+        let bytes = (w as usize) * (h as usize) * 4;
+        self.state
+            .cache
+            .put(p.idx, (tex.clone(), w, h), bytes);
+        Some((tex, w, h))
+    }
+
+    /// Drop all cached textures and pending prefetches (used when the decoded
+    /// representation changes, e.g. rotation or flips).
+    fn invalidate_cache(&mut self) {
+        self.state.cache.clear();
+        self.state.prefetch_queue.clear();
+        self.state.prefetch_gen += 1;
+    }
+
+    /// Recompute the set of pages that should be cached around the current
+    /// page, evict the rest, and prefetch whatever is missing (one decode in
+    /// flight at a time, priority: next page, previous page, then the rest).
+    fn do_caching(&mut self) {
+        let n = self.state.pages.len();
+        if n == 0 {
+            return;
+        }
+        let page = self.state.page;
+        let page_width = if self.state.double_page { 2 } else { 1 };
+        let cap = self.state.prefs.max_pages_to_cache.max(1) as usize;
+
+        let start = page as isize - page_width as isize;
+        let mut wanted: Vec<usize> = Vec::new();
+        for off in 0..cap {
+            let idx = start + off as isize;
+            if idx >= 0 && (idx as usize) < n {
+                wanted.push(idx as usize);
+            }
+        }
+        wanted.sort_by_key(|&i| {
+            if i == page {
+                0
+            } else if i == page + page_width {
+                1
+            } else if i + page_width == page {
+                2
+            } else {
+                3
+            }
+        });
+
+        // Drop pages that fell out of the window.
+        self.state.cache.retain(|k| wanted.contains(k));
+
+        // Queue the missing ones.
+        self.state.prefetch_queue.clear();
+        for &i in &wanted {
+            if !self.state.cache.contains(&i) {
+                self.state.prefetch_queue.push_back(i);
+            }
+        }
+        self.pump_prefetch();
+    }
+
+    fn pump_prefetch(&mut self) {
+        if self.state.prefetching {
+            return;
+        }
+        let Some(idx) = self.state.prefetch_queue.pop_front() else {
+            return;
+        };
+        self.push_load(vec![idx], false);
     }
 
     pub fn redraw(&mut self) {
@@ -1301,8 +1438,34 @@ impl Ui {
         }
         self.state.page = idx;
         log::debug!("goto page {} / {}", idx + 1, n);
-        // Footer and thumbnail selection follow immediately; the page itself
-        // is decoded in the background.
+
+        // Fast path: the target page(s) are already decoded in the cache.
+        let mut visible = vec![idx];
+        if self.state.double_page && n > 1 {
+            visible.push((idx + 1).min(n - 1));
+        }
+        if visible.iter().all(|i| self.state.cache.contains(i)) {
+            let mut textures = vec![None, None];
+            let mut sizes = vec![(0, 0), (0, 0)];
+            for (slot, &i) in visible.iter().enumerate() {
+                if let Some((tex, w, h)) = self.state.cache.get(&i).cloned() {
+                    textures[slot] = Some(tex);
+                    sizes[slot] = (w, h);
+                }
+            }
+            self.state.textures = textures;
+            self.state.sizes = sizes;
+            self.update_status();
+            self.redraw_force();
+            self.scroll_to_destination(dest);
+            self.record_position();
+            self.follow_thumbnail(idx);
+            self.do_caching();
+            return;
+        }
+
+        // Slow path: decode in the background (footer and thumbnail selection
+        // follow immediately; the picture swaps in when ready).
         self.update_status();
         self.follow_thumbnail(idx);
         self.request_pages(dest);
@@ -1457,6 +1620,7 @@ impl Ui {
         self.state.rotation = (self.state.rotation + 90).rem_euclid(360);
         self.state.prefs.rotation = self.state.rotation;
         self.state.prefs.save();
+        self.invalidate_cache();
         self.request_pages(ScrollDest::Keep);
     }
 
@@ -1464,6 +1628,7 @@ impl Ui {
         self.state.rotation = (self.state.rotation + 270).rem_euclid(360);
         self.state.prefs.rotation = self.state.rotation;
         self.state.prefs.save();
+        self.invalidate_cache();
         self.request_pages(ScrollDest::Keep);
     }
 
@@ -1471,16 +1636,19 @@ impl Ui {
         self.state.rotation = (self.state.rotation + 180).rem_euclid(360);
         self.state.prefs.rotation = self.state.rotation;
         self.state.prefs.save();
+        self.invalidate_cache();
         self.request_pages(ScrollDest::Keep);
     }
 
     pub fn flip_horizontally(&mut self) {
         self.state.flip_h = !self.state.flip_h;
+        self.invalidate_cache();
         self.request_pages(ScrollDest::Keep);
     }
 
     pub fn flip_vertically(&mut self) {
         self.state.flip_v = !self.state.flip_v;
+        self.invalidate_cache();
         self.request_pages(ScrollDest::Keep);
     }
 

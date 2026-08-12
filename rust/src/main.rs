@@ -7,6 +7,7 @@ mod app;
 mod archive;
 mod image_loader;
 mod lastread;
+mod lru;
 mod natsort;
 mod prefs;
 mod zoom;
