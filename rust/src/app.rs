@@ -63,6 +63,9 @@ struct PageCmd {
     rotation: i32,
     flip_h: bool,
     flip_v: bool,
+    brightness: f64,
+    contrast: f64,
+    auto_contrast: bool,
 }
 
 /// One decoded page, ready to be turned into a texture on the main thread.
@@ -225,8 +228,16 @@ pub struct Ui {
     pub btn_rotate: gtk::Button,
     pub btn_library: gtk::Button,
     pub btn_prefs: gtk::Button,
+    pub btn_enhance: gtk::Button,
+    pub btn_openwith: gtk::Button,
     pub btn_bookmarks: gtk::MenuButton,
     pub bookmarks_popover: gtk::Popover,
+    /// On-screen display (page info, auto-hides).
+    pub osd: gtk::Label,
+    pub osd_source: Option<glib::SourceId>,
+    /// True once the OSD timeout has fired (its source is gone; the stored id
+    /// must not be removed again).
+    pub osd_fired: Rc<std::cell::Cell<bool>>,
     pub btn_double: gtk::ToggleButton,
     pub btn_manga: gtk::ToggleButton,
     pub btn_slideshow: gtk::ToggleButton,
@@ -327,6 +338,14 @@ impl Ui {
         let sep3 = gtk::Separator::new(gtk::Orientation::Vertical);
         toolbar.append(&sep3);
 
+        let btn_enhance = gtk::Button::with_label("Enhance");
+        btn_enhance.set_tooltip_text(Some("Enhance image (brightness/contrast)"));
+        toolbar.append(&btn_enhance);
+
+        let btn_openwith = gtk::Button::from_icon_name("system-run");
+        btn_openwith.set_tooltip_text(Some("Open with…"));
+        toolbar.append(&btn_openwith);
+
         let btn_bookmarks = gtk::MenuButton::new();
         btn_bookmarks.set_icon_name("bookmark-new");
         btn_bookmarks.set_tooltip_text(Some("Bookmarks"));
@@ -385,6 +404,18 @@ impl Ui {
         scrolled.set_child(Some(&content));
         scrolled.set_css_classes(&["viewer"]);
 
+        // Overlay hosting the OSD label.
+        let viewer_overlay = gtk::Overlay::new();
+        viewer_overlay.set_child(Some(&scrolled));
+        let osd = gtk::Label::new(Some(""));
+        osd.set_css_classes(&["osd"]);
+        osd.set_halign(gtk::Align::End);
+        osd.set_valign(gtk::Align::End);
+        osd.set_margin_end(16);
+        osd.set_margin_bottom(12);
+        osd.set_visible(false);
+        viewer_overlay.add_overlay(&osd);
+
         // ---- thumbnails ----
         let thumb_box = gtk::FlowBox::new();
         thumb_box.set_max_children_per_line(1);
@@ -402,7 +433,7 @@ impl Ui {
         // ---- paned ----
         let paned = gtk::Paned::new(gtk::Orientation::Horizontal);
         paned.set_start_child(Some(&thumb_scroll));
-        paned.set_end_child(Some(&scrolled));
+        paned.set_end_child(Some(&viewer_overlay));
         paned.set_position(180);
 
         // ---- statusbar ----
@@ -446,8 +477,13 @@ impl Ui {
             btn_rotate,
             btn_library,
             btn_prefs,
+            btn_enhance,
+            btn_openwith,
             btn_bookmarks,
             bookmarks_popover,
+            osd,
+            osd_source: None,
+            osd_fired: Rc::new(std::cell::Cell::new(false)),
             btn_double,
             btn_manga,
             btn_slideshow,
@@ -608,6 +644,12 @@ impl Ui {
                                             cmd.flip_h,
                                             cmd.flip_v,
                                         );
+                                        let img = image_loader::enhance(
+                                            &img,
+                                            cmd.brightness,
+                                            cmd.contrast,
+                                            cmd.auto_contrast,
+                                        );
                                         let (w, h) = img.dimensions();
                                         out.push(DecodedPage {
                                             idx,
@@ -721,6 +763,20 @@ impl Ui {
         self.btn_rotate.connect_clicked({
             let r = rc.clone();
             move |_| r.borrow_mut().rotate_90()
+        });
+        self.btn_enhance.connect_clicked({
+            let r = rc.clone();
+            move |_| {
+                let ui = r.borrow();
+                ui.enhance_dialog(r.clone());
+            }
+        });
+        self.btn_openwith.connect_clicked({
+            let r = rc.clone();
+            move |_| {
+                let ui = r.borrow();
+                ui.openwith_dialog(r.clone());
+            }
         });
         self.btn_library.connect_clicked({
             let r = rc.clone();
@@ -1066,6 +1122,10 @@ impl Ui {
                         self.state.textures = vec![None, None];
                         self.state.sizes = vec![(0, 0), (0, 0)];
                         self.window.set_title(Some(&format!("{name} — MComix3")));
+                        self.show_osd(&format!(
+                            "{name} — {} pages",
+                            self.state.pages.len()
+                        ));
                         self.update_status();
                         self.record_position();
                         self.pause_thumbs(false);
@@ -1130,6 +1190,9 @@ impl Ui {
             rotation: self.state.rotation,
             flip_h: self.state.flip_h,
             flip_v: self.state.flip_v,
+            brightness: self.state.prefs.brightness,
+            contrast: self.state.prefs.contrast,
+            auto_contrast: self.state.prefs.auto_contrast,
         };
         if display {
             self.state.page_loading = true;
@@ -1538,6 +1601,7 @@ impl Ui {
         }
         self.state.page = idx;
         log::debug!("goto page {} / {}", idx + 1, n);
+        self.show_osd(&format!("Page {} / {n}", idx + 1));
         self.refresh_thumb_wanted();
 
         // Fast path: the target page(s) are already decoded in the cache.
@@ -1849,6 +1913,33 @@ impl Ui {
 
     pub fn toggle_lens(&mut self) {
         self.notice("The magnifying lens is not ported yet.");
+    }
+
+    /// Show a transient OSD message at the bottom of the viewer.
+    pub fn show_osd(&mut self, text: &str) {
+        if !self.state.prefs.show_osd {
+            return;
+        }
+        self.osd.set_text(text);
+        self.osd.set_visible(true);
+        // Remove the previous timeout only if it hasn't fired yet (a fired
+        // source is already destroyed; removing it again would panic).
+        if let Some(id) = self.osd_source.take() {
+            if !self.osd_fired.get() {
+                id.remove();
+            }
+        }
+        self.osd_fired.set(false);
+        let osd = self.osd.clone();
+        let fired = self.osd_fired.clone();
+        self.osd_source = Some(glib::timeout_add_local(
+            Duration::from_millis(2500),
+            move || {
+                osd.set_visible(false);
+                fired.set(true);
+                glib::ControlFlow::Break
+            },
+        ));
     }
 
     pub fn show_info_panel(&mut self) {
@@ -2199,6 +2290,225 @@ impl Ui {
         None
     }
 
+    // ================= image enhancement =================
+
+    /// Enhancement dialog: brightness / contrast sliders + auto-contrast.
+    pub fn enhance_dialog(&self, rc: Rc<RefCell<Ui>>) {
+        let dlg = gtk::Window::new();
+        dlg.set_title(Some("Enhance image"));
+        dlg.set_transient_for(Some(&self.window));
+        dlg.set_modal(true);
+        dlg.set_resizable(false);
+
+        let bright = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.5, 1.5, 0.05);
+        bright.set_value(self.state.prefs.brightness);
+        bright.set_digits(2);
+        bright.set_value_pos(gtk::PositionType::Top);
+        bright.set_hexpand(true);
+
+        let contrast = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.5, 1.5, 0.05);
+        contrast.set_value(self.state.prefs.contrast);
+        contrast.set_digits(2);
+        contrast.set_value_pos(gtk::PositionType::Top);
+        contrast.set_hexpand(true);
+
+        let auto_c = gtk::CheckButton::with_label("Auto contrast");
+        auto_c.set_active(self.state.prefs.auto_contrast);
+
+        let apply = gtk::Button::with_label("Apply");
+        apply.add_css_class("suggested-action");
+        let close = gtk::Button::with_label("Close");
+
+        let grid = gtk::Grid::new();
+        grid.set_row_spacing(10);
+        grid.set_column_spacing(12);
+        grid.set_margin_top(14);
+        grid.set_margin_bottom(14);
+        grid.set_margin_start(16);
+        grid.set_margin_end(16);
+        let bl = gtk::Label::new(Some("Brightness:"));
+        bl.set_xalign(0.0);
+        grid.attach(&bl, 0, 0, 1, 1);
+        grid.attach(&bright, 1, 0, 1, 1);
+        let cl = gtk::Label::new(Some("Contrast:"));
+        cl.set_xalign(0.0);
+        grid.attach(&cl, 0, 1, 1, 1);
+        grid.attach(&contrast, 1, 1, 1, 1);
+        grid.attach(&auto_c, 1, 2, 1, 1);
+
+        let h = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        h.set_halign(gtk::Align::End);
+        h.set_margin_start(16);
+        h.set_margin_end(16);
+        h.set_margin_bottom(10);
+        h.append(&close);
+        h.append(&apply);
+
+        let vbox = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        vbox.append(&grid);
+        vbox.append(&h);
+        dlg.set_child(Some(&vbox));
+
+        let r = rc.clone();
+        let dlg2 = dlg.clone();
+        apply.connect_clicked(move |_| {
+            let mut ui = r.borrow_mut();
+            ui.state.prefs.brightness = bright.value();
+            ui.state.prefs.contrast = contrast.value();
+            ui.state.prefs.auto_contrast = auto_c.is_active();
+            ui.state.prefs.save();
+            ui.invalidate_cache();
+            ui.request_pages(ScrollDest::Keep);
+            dlg2.close();
+        });
+        let dlg3 = dlg.clone();
+        close.connect_clicked(move |_| dlg3.close());
+        dlg.connect_close_request(|_| glib::Propagation::Proceed);
+
+        // Escape closes.
+        let esc = gtk::EventControllerKey::new();
+        esc.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let dlg_esc = dlg.clone();
+        esc.connect_key_pressed(move |_c, keyval, _code, _state| {
+            if keyval == gdk::Key::Escape {
+                dlg_esc.close();
+                glib::Propagation::Stop
+            } else {
+                glib::Propagation::Proceed
+            }
+        });
+        dlg.add_controller(esc);
+
+        dlg.present();
+    }
+
+    // ================= open with =================
+
+    /// Run an external command on the current file (`%f` is substituted with
+    /// the file path if present, otherwise the path is appended).
+    fn run_external_command(&self, command: &str, path: &std::path::Path) {
+        let cmd = if command.contains("%f") {
+            command.replace("%f", &path.display().to_string())
+        } else {
+            format!("{command} {}", path.display())
+        };
+        let parts: Vec<&str> = cmd.split_whitespace().collect();
+        if parts.is_empty() {
+            return;
+        }
+        let mut c = std::process::Command::new(parts[0]);
+        c.args(&parts[1..]);
+        if let Err(e) = c.spawn() {
+            self.notice(&format!("Could not run '{}': {e}", parts[0]));
+        }
+    }
+
+    /// "Open with…" dialog: run a remembered or ad-hoc command on the file.
+    pub fn openwith_dialog(&self, rc: Rc<RefCell<Ui>>) {
+        let Some(path) = self.state.path.clone() else {
+            return;
+        };
+        let dlg = gtk::Window::new();
+        dlg.set_title(Some("Open with…"));
+        dlg.set_transient_for(Some(&self.window));
+        dlg.set_modal(true);
+        dlg.set_default_size(420, 320);
+
+        let list = gtk::ListBox::new();
+        let commands = self.state.prefs.openwith_commands.clone();
+        for (label, command) in &commands {
+            let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+            row.set_margin_top(4);
+            row.set_margin_bottom(4);
+            row.set_margin_start(6);
+            row.set_margin_end(6);
+            let l = gtk::Label::new(Some(label));
+            l.set_hexpand(true);
+            l.set_xalign(0.0);
+            row.append(&l);
+            let run = gtk::Button::with_label("Run");
+            row.append(&run);
+            list.append(&row);
+            let command = command.clone();
+            let path = path.clone();
+            let r = rc.clone();
+            let dlg2 = dlg.clone();
+            run.connect_clicked(move |_| {
+                let ui = r.borrow();
+                ui.run_external_command(&command, &path);
+                dlg2.close();
+            });
+        }
+
+        let scroller = gtk::ScrolledWindow::new();
+        scroller.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Automatic);
+        scroller.set_child(Some(&list));
+        scroller.set_max_content_height(180);
+
+        let entry = gtk::Entry::new();
+        entry.set_placeholder_text(Some("Command (use %f for the file)"));
+        let remember = gtk::CheckButton::with_label("Remember this command");
+        let run_now = gtk::Button::with_label("Run");
+        let close = gtk::Button::with_label("Close");
+
+        let form = gtk::Box::new(gtk::Orientation::Vertical, 6);
+        form.set_margin_top(8);
+        form.set_margin_bottom(8);
+        form.set_margin_start(12);
+        form.set_margin_end(12);
+        form.append(&entry);
+        form.append(&remember);
+        let h = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        h.set_halign(gtk::Align::End);
+        h.append(&close);
+        h.append(&run_now);
+        form.append(&h);
+
+        let vbox = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        vbox.append(&scroller);
+        vbox.append(&form);
+        dlg.set_child(Some(&vbox));
+
+        let path2 = path.clone();
+        let r = rc.clone();
+        let dlg2 = dlg.clone();
+        run_now.connect_clicked(move |_| {
+            let cmd = entry.text().to_string();
+            if cmd.trim().is_empty() {
+                return;
+            }
+            {
+                let ui = r.borrow();
+                ui.run_external_command(&cmd, &path2);
+            }
+            if remember.is_active() {
+                let mut ui = r.borrow_mut();
+                ui.state.prefs.openwith_commands.push((cmd, entry.text().to_string()));
+                ui.state.prefs.save();
+            }
+            dlg2.close();
+        });
+        let dlg3 = dlg.clone();
+        close.connect_clicked(move |_| dlg3.close());
+        dlg.connect_close_request(|_| glib::Propagation::Proceed);
+
+        // Escape closes.
+        let esc = gtk::EventControllerKey::new();
+        esc.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let dlg_esc = dlg.clone();
+        esc.connect_key_pressed(move |_c, keyval, _code, _state| {
+            if keyval == gdk::Key::Escape {
+                dlg_esc.close();
+                glib::Propagation::Stop
+            } else {
+                glib::Propagation::Proceed
+            }
+        });
+        dlg.add_controller(esc);
+
+        dlg.present();
+    }
+
     // ================= bookmarks =================
 
     /// Rebuild the bookmark menu (popover content).
@@ -2520,7 +2830,10 @@ fn apply_background_css(prefs: &Prefs) {
         ".viewer {{ background-color: rgb({r},{g},{b}); }} \
          .thumbview {{ background-color: rgb({tr},{tg},{tb}); }} \
          .placeholder {{ font-size: 14pt; color: rgba(128,128,128,1); }} \
-         .page-num {{ font-size: 8pt; }}"
+         .page-num {{ font-size: 8pt; }} \
+         .osd {{ background-color: rgba(0,0,0,0.72); color: #fff; \
+                 padding: 6px 12px; border-radius: 5px; \
+                 font-weight: bold; }}"
     );
     let provider = gtk::CssProvider::new();
     provider.load_from_string(&css);

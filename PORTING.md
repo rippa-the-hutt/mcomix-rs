@@ -45,7 +45,7 @@ rust/
 | `archive/rar_external.py` | `archive/rar.rs` | ✅ done (external unrar/7z) |
 | `archive/lha_external.py` | `archive/lha.rs` | ✅ done (external 7z, `lha` fallback) |
 | `archive/pdf_external.py` | `archive/pdf.rs` | ✅ done (mutool; fixed 216 DPI) |
-| `archive_recursive.py` (archive-in-archive) | — | ⏳ later |
+| `archive_recursive.py` (archive-in-archive) | — | ⏳ deferred |
 | `image_handler.py` (cache, prefetch) | `app.rs` + `lru.rs` | ✅ LRU page cache (`max pages to cache`) + background prefetch |
 | `image_tools.py` | `image_loader.rs` | ✅ core; enhancers ⏳ |
 | `zoom.py` | `zoom.rs` | ✅ core |
@@ -58,10 +58,10 @@ rust/
 | `bookmark_backend.py` + dialogs | — | ⏳ next (serde JSON) |
 | `library/*` (sqlite book DB) | `library.rs` + `library_dialog.rs` | ✅ rusqlite backend (books/collections/recent/watchlist) + library window |
 | `keybindings.py` + editor | `keybindings.rs` + Shortcuts tab | ✅ configurable (JSON `keybindings.conf`) |
-| `enhance_backend.py` (contrast/brightness…) | — | ⏳ later (`image` ops) |
-| `lens.py` (magnifier) | — | ⏳ later (overlay) |
-| `osd.py` | `app.rs` status/OSD-lite | 🟡 partial |
-| `openwith.py` | — | ⏳ later |
+| `enhance_backend.py` (contrast/brightness…) | `app.rs` + `image_loader.rs` | ✅ brightness/contrast/auto-contrast (saturation/sharpness ⏳) |
+| `lens.py` (magnifier) | — | ⏳ deferred (overlay crop) |
+| `osd.py` | `app.rs` OSD overlay | ✅ transient page/file OSD |
+| `openwith.py` | `app.rs` | ✅ Open-with dialog + remembered commands |
 | `archive_packer.py` (edit archive) | — | ⏳ later (`zip` write support) |
 | `edit_*.py` (image editing) | — | ⏳ later |
 | i18n (`messages/*.po`) | — | ⏳ later (gettext-rs or fluent) |
@@ -123,9 +123,9 @@ Windows notes:
 
 ## What's next (suggested order)
 
-1. **Library** (rusqlite backend; port `mcomix/library/*`).
-3. **Recursive archives, image enhancement, magnifying lens, OSD, openwith.**
-4. **i18n** (reuse the existing `.po` files via gettext-rs).
+1. **Magnifying lens** (overlay crop of the current page following the cursor).
+2. **Recursive archives** (archives inside archives).
+3. **i18n** (reuse the existing `.po` files via gettext-rs).
 5. **AppImage** for a truly standalone Linux distribution.
 6. **PDF polish**: port the optimal-DPI trace pass from `pdf_external.py`.
 7. **Full smart-scroll layout engine** (port `layout.py`/`scrolling.py` box model).

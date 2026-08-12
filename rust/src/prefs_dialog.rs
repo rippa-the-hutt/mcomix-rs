@@ -45,9 +45,17 @@ fn page_grid() -> gtk::Grid {
 }
 
 fn add_row(grid: &gtk::Grid, label: &str, widget: Option<&impl IsA<gtk::Widget>>, row: &mut i32) {
-    let l = gtk::Label::new(Some(label));
-    l.set_xalign(0.0);
-    grid.attach(&l, 0, *row, 1, 1);
+    if label.is_empty() {
+        // Spacer that pushes the widget to the right edge, matching rows that
+        // carry a text label in this column.
+        let spacer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        spacer.set_hexpand(true);
+        grid.attach(&spacer, 0, *row, 1, 1);
+    } else {
+        let l = gtk::Label::new(Some(label));
+        l.set_xalign(0.0);
+        grid.attach(&l, 0, *row, 1, 1);
+    }
     if let Some(w) = widget {
         w.set_halign(gtk::Align::End);
         grid.attach(w, 1, *row, 1, 1);
@@ -99,6 +107,7 @@ struct PrefsForm {
     hide_all_fullscreen: gtk::CheckButton,
     auto_rotate_exif: gtk::CheckButton,
     show_scrollbar: gtk::CheckButton,
+    show_osd: gtk::CheckButton,
     zoom_mode: gtk::DropDown,
     fit_to_size_mode: gtk::DropDown,
     fit_to_size_px: gtk::SpinButton,
@@ -131,6 +140,7 @@ impl PrefsForm {
             hide_all_fullscreen: check("Automatically hide all toolbars in fullscreen", p.hide_all_in_fullscreen),
             auto_rotate_exif: check("Automatically rotate images according to their metadata", p.auto_rotate_from_exif),
             show_scrollbar: check("Show scrollbars", p.show_scrollbar),
+            show_osd: check("Show on-screen page indicator", p.show_osd),
             zoom_mode: dropdown(
                 &["Best fit", "Fit width", "Fit height", "Fit size", "Manual"],
                 p.zoom_mode.clamp(0, 4) as u32,
@@ -171,6 +181,8 @@ impl PrefsForm {
         add_row(&grid, "", Some(&self.checkered_bg), &mut row);
         let page = gtk::ScrolledWindow::new();
         page.set_child(Some(&grid));
+        page.set_vexpand(true);
+        page.set_min_content_height(340);
         let sp = stack.add_named(&page, Some("appearance"));
         sp.set_title("Appearance");
 
@@ -186,6 +198,8 @@ impl PrefsForm {
         add_row(&grid, "", Some(&self.default_manga), &mut row);
         let page = gtk::ScrolledWindow::new();
         page.set_child(Some(&grid));
+        page.set_vexpand(true);
+        page.set_min_content_height(340);
         let sp = stack.add_named(&page, Some("behaviour"));
         sp.set_title("Behaviour");
 
@@ -196,12 +210,15 @@ impl PrefsForm {
         add_row(&grid, "", Some(&self.hide_all_fullscreen), &mut row);
         add_row(&grid, "", Some(&self.auto_rotate_exif), &mut row);
         add_row(&grid, "", Some(&self.show_scrollbar), &mut row);
+        add_row(&grid, "", Some(&self.show_osd), &mut row);
         add_row(&grid, "Default zoom mode:", Some(&self.zoom_mode), &mut row);
         add_row(&grid, "Fit to size mode:", Some(&self.fit_to_size_mode), &mut row);
         add_row(&grid, "Fixed size for this mode (px):", Some(&self.fit_to_size_px), &mut row);
         add_row(&grid, "Slideshow delay (seconds):", Some(&self.slideshow_delay), &mut row);
         let page = gtk::ScrolledWindow::new();
         page.set_child(Some(&grid));
+        page.set_vexpand(true);
+        page.set_min_content_height(340);
         let sp = stack.add_named(&page, Some("display"));
         sp.set_title("Display");
 
@@ -216,6 +233,8 @@ impl PrefsForm {
         add_row(&grid, "", Some(&self.scale_up), &mut row);
         let page = gtk::ScrolledWindow::new();
         page.set_child(Some(&grid));
+        page.set_vexpand(true);
+        page.set_min_content_height(340);
         let sp = stack.add_named(&page, Some("scrolling"));
         sp.set_title("Scrolling");
 
@@ -244,6 +263,7 @@ impl PrefsForm {
         p.hide_all_in_fullscreen = self.hide_all_fullscreen.is_active();
         p.auto_rotate_from_exif = self.auto_rotate_exif.is_active();
         p.show_scrollbar = self.show_scrollbar.is_active();
+        p.show_osd = self.show_osd.is_active();
         p.zoom_mode = self.zoom_mode.selected() as i32;
         p.fit_to_size_mode = match self.fit_to_size_mode.selected() {
             0 => zoom::ZOOM_MODE_WIDTH,
@@ -390,6 +410,8 @@ fn shortcuts_page(parent: &impl IsA<gtk::Window>, bindings: Rc<RefCell<BindingMa
     let scroller = gtk::ScrolledWindow::new();
     scroller.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Automatic);
     scroller.set_child(Some(&list));
+    scroller.set_vexpand(true);
+    scroller.set_min_content_height(340);
     scroller.upcast::<gtk::Widget>()
 }
 
@@ -427,6 +449,7 @@ pub fn show_dialog(parent: &impl IsA<gtk::Window>, prefs: &Prefs, on_apply: Rc<d
     vbox.append(&switcher);
     vbox.append(&stack);
     vbox.append(&footer);
+    stack.set_vexpand(true);
 
     let dlg = gtk::Window::new();
     dlg.set_title(Some("Preferences"));

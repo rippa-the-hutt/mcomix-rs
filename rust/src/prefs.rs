@@ -122,6 +122,14 @@ pub struct Prefs {
     pub scaling_quality: i32,
     pub animation_mode: i32,
 
+    // Open-with commands: (label, command)
+    pub openwith_commands: Vec<(String, String)>,
+    // Image enhancement
+    pub brightness: f64,
+    pub contrast: f64,
+    pub auto_contrast: bool,
+    pub show_osd: bool,
+
     // Window geometry
     pub window_x: i32,
     pub window_y: i32,
@@ -187,6 +195,11 @@ impl Default for Prefs {
             max_pages_to_cache: 7,
             scaling_quality: 2, // BILINEAR
             animation_mode: 0,  // ANIMATION_DISABLED
+            openwith_commands: Vec::new(),
+            brightness: 1.0,
+            contrast: 1.0,
+            auto_contrast: false,
+            show_osd: true,
             window_x: 0,
             window_y: 0,
             window_width: 1024,

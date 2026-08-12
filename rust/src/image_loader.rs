@@ -175,3 +175,52 @@ mod bench {
         }
     }
 }
+
+/// Auto-contrast via luminance histogram stretch (mirrors MComix).
+pub fn auto_contrast(img: &RgbaImage) -> RgbaImage {
+    let mut min = 255u8;
+    let mut max = 0u8;
+    for p in img.pixels() {
+        let y = (0.299 * p[0] as f32 + 0.587 * p[1] as f32 + 0.114 * p[2] as f32) as u8;
+        min = min.min(y);
+        max = max.max(y);
+    }
+    if max <= min {
+        return img.clone();
+    }
+    let scale = 255.0 / (max - min) as f32;
+    let mut out = img.clone();
+    for p in out.pixels_mut() {
+        for c in 0..3 {
+            let v = ((p[c] as f32 - min as f32) * scale).clamp(0.0, 255.0) as u8;
+            p[c] = v;
+        }
+    }
+    out
+}
+
+/// Apply brightness/contrast (1.0 = unchanged) and optional auto-contrast.
+pub fn enhance(
+    img: &RgbaImage,
+    brightness: f64,
+    contrast: f64,
+    use_auto_contrast: bool,
+) -> RgbaImage {
+    let mut out = img.clone();
+    if use_auto_contrast {
+        out = auto_contrast(&out);
+    }
+    if (brightness - 1.0).abs() > 0.001 {
+        let delta = ((brightness - 1.0) * 255.0).clamp(-255.0, 255.0) as i32;
+        let mut d = image::DynamicImage::ImageRgba8(out);
+        image::imageops::colorops::brighten(&mut d, delta);
+        out = d.into_rgba8();
+    }
+    if (contrast - 1.0).abs() > 0.001 {
+        let delta = ((contrast - 1.0) * 127.0).clamp(-255.0, 255.0) as f32;
+        let mut d = image::DynamicImage::ImageRgba8(out);
+        image::imageops::colorops::contrast(&mut d, delta);
+        out = d.into_rgba8();
+    }
+    out
+}
