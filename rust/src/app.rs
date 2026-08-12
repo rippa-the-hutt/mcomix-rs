@@ -1288,6 +1288,13 @@ impl Ui {
         if n == 0 {
             return;
         }
+        // While a page is still decoding, ignore navigation input: the user
+        // expects "flip -> wait for the page to appear -> flip again", not
+        // queued/skipped pages. (Decoding runs off the UI thread, so the UI
+        // stays responsive; the flip just happens when the page is ready.)
+        if self.state.page_loading {
+            return;
+        }
         let idx = idx.min(n - 1);
         if idx == self.state.page {
             return;

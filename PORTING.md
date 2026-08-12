@@ -43,8 +43,8 @@ rust/
 | `archive/tar.py` (+gz/bz2/xz) | `archive/tar.rs` | ✅ done |
 | `archive/sevenzip_external.py` | `archive/sevenzip.rs` | ✅ done (external `7z` first, pure-Rust `sevenz-rust` fallback) |
 | `archive/rar_external.py` | `archive/rar.rs` | ✅ done (external unrar/7z) |
-| `archive/lha_external.py` | — | ⏳ next (external 7z/lha) |
-| `archive/pdf_external.py` | — | ⏳ next (mutool; or `mupdf` crate) |
+| `archive/lha_external.py` | `archive/lha.rs` | ✅ done (external 7z, `lha` fallback) |
+| `archive/pdf_external.py` | `archive/pdf.rs` | ✅ done (mutool; fixed 216 DPI) |
 | `archive_recursive.py` (archive-in-archive) | — | ⏳ later |
 | `image_handler.py` (cache, prefetch) | `app.rs` (2-page cache only) | 🟡 partial; add LRU prefetch |
 | `image_tools.py` | `image_loader.rs` | ✅ core; enhancers ⏳ |
@@ -123,12 +123,12 @@ Windows notes:
 
 ## What's next (suggested order)
 
-1. **LHA + PDF readers** (external `7z`/`lha`, `mutool`; later `mupdf` crate).
-2. **Smart scrolling + page cache** (prefetch next/prev pages in a worker;
+1. **Smart scrolling + page cache** (prefetch next/prev pages in a worker;
    LRU of ~7 decoded pages like `max pages to cache`).
-3. **Preferences dialog + keybinding editor** (mirror `preferences_dialog.py`).
-4. **Bookmarks** (serde JSON; port `bookmark_backend.py` + dialogs).
-5. **Library** (rusqlite backend; port `mcomix/library/*`).
-6. **Recursive archives, image enhancement, magnifying lens, OSD, openwith.**
-7. **i18n** (reuse the existing `.po` files via gettext-rs).
-8. **AppImage** for a truly standalone Linux distribution.
+2. **Preferences dialog + keybinding editor** (mirror `preferences_dialog.py`).
+3. **Bookmarks** (serde JSON; port `bookmark_backend.py` + dialogs).
+4. **Library** (rusqlite backend; port `mcomix/library/*`).
+5. **Recursive archives, image enhancement, magnifying lens, OSD, openwith.**
+6. **i18n** (reuse the existing `.po` files via gettext-rs).
+7. **AppImage** for a truly standalone Linux distribution.
+8. **PDF polish**: port the optimal-DPI trace pass from `pdf_external.py`.

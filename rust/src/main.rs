@@ -16,7 +16,6 @@ use std::path::PathBuf;
 use clap::{ArgAction, Parser};
 use gio::prelude::*;
 
-use crate::archive::{ArchiveKind, detect};
 use crate::prefs::Prefs;
 
 /// View images and comic book archives.
@@ -148,20 +147,6 @@ fn build_window(
 
     if args.library {
         log::warn!("--library is not ported yet; opening normally.");
-    }
-
-    if let Some(p) = &open_path {
-        if let Some(kind) = detect(p) {
-            match kind {
-                ArchiveKind::Lha => {
-                    log::warn!("LHA support is not ported yet; open this with 7z or convert it.");
-                }
-                ArchiveKind::Pdf => {
-                    log::warn!("PDF support is not ported yet; a mutool-based backend is planned.");
-                }
-                _ => {}
-            }
-        }
     }
 
     let ui = app::Ui::new(app, open_path, page);

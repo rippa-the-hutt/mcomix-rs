@@ -6,7 +6,7 @@
 # CI installs the toolchain first; to do it manually run:
 #   pacman -S --needed mingw-w64-x86_64-gcc mingw-w64-x86_64-pkgconf \
 #       mingw-w64-x86_64-gtk4 mingw-w64-x86_64-ntldd mingw-w64-x86_64-nsis \
-#       mingw-w64-x86_64-zip
+#       mingw-w64-x86_64-zip mingw-w64-x86_64-mupdf mingw-w64-x86_64-7zip
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"   # rust/ crate root
@@ -56,6 +56,15 @@ if [ -d "$LOADERS" ]; then
     mkdir -p "$DIST_DIR/lib/gdk-pixbuf-2.0/2.10.0/loaders"
     cp "$LOADERS"/*.dll "$DIST_DIR/lib/gdk-pixbuf-2.0/2.10.0/loaders/" 2>/dev/null || true
 fi
+
+# External tools used by the archive backends (PDF via mutool, RAR/LHA via 7z).
+for tool in mutool 7z; do
+    if [ -f "$MINGW/bin/$tool.exe" ]; then
+        cp "$MINGW/bin/$tool.exe" "$DIST_DIR/"
+    else
+        echo "WARNING: $tool.exe not found; PDF/RAR/LHA support will be limited."
+    fi
+done
 
 echo "==> Creating portable zip"
 (cd dist && zip -qr "mcomix-rs-${VERSION}-windows-x86_64.zip" mcomix-rs-win64)

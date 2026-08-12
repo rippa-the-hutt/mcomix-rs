@@ -2,6 +2,8 @@
 //!
 //! Mirrors `mcomix/archive_tools.py` + `mcomix/archive/*`.
 
+pub mod lha;
+pub mod pdf;
 pub mod rar;
 pub mod sevenzip;
 pub mod tar;
@@ -176,10 +178,8 @@ pub fn open_with_kind(path: &Path, kind: ArchiveKind) -> Result<Box<dyn Archive>
         ArchiveKind::Tar => Ok(Box::new(tar::TarArchive::open(path, None)?)),
         ArchiveKind::SevenZip => Ok(Box::new(sevenzip::SevenZipArchive::open(path)?)),
         ArchiveKind::Rar => Ok(Box::new(crate::archive::rar::RarArchive::open(path)?)),
-        ArchiveKind::Lha | ArchiveKind::Pdf => Err(ArchiveError::Other(format!(
-            "the {kind} reader is not wired up yet in this milestone; \
-             install 7z/mutool and it will be added"
-        ))),
+        ArchiveKind::Lha => Ok(Box::new(crate::archive::lha::LhaArchive::open(path)?)),
+        ArchiveKind::Pdf => Ok(Box::new(crate::archive::pdf::PdfArchive::open(path)?)),
     }
 }
 
