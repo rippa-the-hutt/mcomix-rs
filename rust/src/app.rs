@@ -32,6 +32,19 @@ enum ScrollDest {
     Keep,
 }
 
+/// Commands for the lazy thumbnail manager thread.
+enum ThumbCmd {
+    /// Replace the set of wanted pages (in priority order).
+    SetWanted {
+        gen: u64,
+        path: PathBuf,
+        pages: Vec<String>,
+        indices: Vec<usize>,
+    },
+    /// Pause/resume generation (paused while a page is decoding).
+    Pause(bool),
+}
+
 /// Command for the background page-decoding worker.
 struct PageCmd {
     /// Display requests only: incremented per display push; results with an
@@ -88,9 +101,10 @@ pub struct AppState {
     pub sizes: Vec<(u32, u32)>,
     /// Generation counter for the thumbnail worker; stale results are dropped.
     pub thumb_gen: u64,
-    /// Sender for thumbnail pixels produced by the worker thread
-    /// (generation, page index, width, height, tight RGBA8 data).
-    pub thumb_tx: Option<std::sync::mpsc::Sender<(u64, usize, u32, u32, Vec<u8>)>>,
+    /// Sender for thumbnail-manager commands.
+    pub thumb_tx: Option<std::sync::mpsc::Sender<ThumbCmd>>,
+    /// Last sent "wanted" set (avoid resending identical requests).
+    pub thumb_wanted_last: std::collections::BTreeSet<usize>,
     /// Page index -> thumbnail cell. Cells are pre-created in page order so
     /// the sidebar is stable while thumbnails load; images fill in via
     /// `thumb_pics`.
@@ -183,6 +197,7 @@ impl Default for AppState {
             bindings: crate::keybindings::BindingMap::load(),
             thumb_cells: Vec::new(),
             thumb_pics: Vec::new(),
+            thumb_wanted_last: std::collections::BTreeSet::new(),
         }
     }
 }
@@ -434,8 +449,119 @@ impl Ui {
         // Background page-decoder channel + worker, created once for the app
         // lifetime (the worker re-opens the archive when the path changes).
         {
-            let (thumb_tx, thumb_rx) = std::sync::mpsc::channel::<(u64, usize, u32, u32, Vec<u8>)>();
+            let (thumb_tx, thumb_cmd_rx) = std::sync::mpsc::channel::<ThumbCmd>();
+            let (thumb_res_tx, thumb_res_rx) =
+                std::sync::mpsc::channel::<(u64, usize, u32, u32, Vec<u8>)>();
             ui.borrow_mut().state.thumb_tx = Some(thumb_tx);
+
+            // Lazy thumbnail manager: processes the wanted set (window around
+            // the current page + visible viewport) one page at a time, in
+            // priority order, checking the disk cache first. A single low-rate
+            // thread keeps CPU load off the page decoder.
+            std::thread::spawn(move || {
+                let mut ar: Option<Box<dyn Archive>> = None;
+                let mut ar_path: Option<PathBuf> = None;
+                let mut wanted: Vec<usize> = Vec::new();
+                let mut wanted_pos: usize = 0;
+                let mut done: std::collections::HashSet<usize> = std::collections::HashSet::new();
+                let mut gen: u64 = 0;
+                let mut path: PathBuf = PathBuf::new();
+                let mut pages: Vec<String> = Vec::new();
+                let mut paused = false;
+
+                // Every command must be handled exactly once: commands drained
+                // with try_recv, and the single command returned by the
+                // blocking recv() (used while idle / paused).
+                macro_rules! handle_cmd {
+                    ($cmd:expr) => {
+                        match $cmd {
+                            ThumbCmd::SetWanted {
+                                gen: g,
+                                path: p,
+                                pages: ps,
+                                indices,
+                            } => {
+                                log::debug!(
+                                    "thumb manager: SetWanted gen={g} n={}",
+                                    indices.len()
+                                );
+                                if g != gen {
+                                    gen = g;
+                                    path = p;
+                                    pages = ps;
+                                    done.clear();
+                                }
+                                wanted = indices;
+                                wanted_pos = 0;
+                            }
+                            ThumbCmd::Pause(p) => {
+                                log::debug!("thumb manager: pause={p}");
+                                paused = p;
+                            }
+                        }
+                    };
+                }
+
+                loop {
+                    // Drain everything already queued.
+                    while let Ok(cmd) = thumb_cmd_rx.try_recv() {
+                        handle_cmd!(cmd);
+                    }
+
+                    if paused {
+                        // Wait for a resume command and handle it directly.
+                        match thumb_cmd_rx.recv() {
+                            Ok(cmd) => handle_cmd!(cmd),
+                            Err(_) => break,
+                        }
+                        continue;
+                    }
+
+                    // Skip pages already processed.
+                    while wanted_pos < wanted.len() && done.contains(&wanted[wanted_pos]) {
+                        wanted_pos += 1;
+                    }
+                    if wanted_pos >= wanted.len() {
+                        // Nothing wanted right now: block for a command and
+                        // handle it (don't discard it!).
+                        match thumb_cmd_rx.recv() {
+                            Ok(cmd) => handle_cmd!(cmd),
+                            Err(_) => break,
+                        }
+                        continue;
+                    }
+                    let idx = wanted[wanted_pos];
+                    wanted_pos += 1;
+                    done.insert(idx);
+                    log::debug!("thumb manager: decode page {}", idx + 1);
+
+                    if ar_path.as_deref() != Some(path.as_path()) {
+                        ar = archive::open(&path).ok();
+                        ar_path = Some(path.clone());
+                        if ar.is_none() {
+                            warn!("thumbnail manager cannot open {}", path.display());
+                        }
+                    }
+                    if let Some(ar) = ar.as_mut() {
+                        if let Some(name) = pages.get(idx) {
+                            if let Ok(bytes) = ar.read(name) {
+                                let thumb = crate::thumb_cache::load(&path, idx).or_else(|| {
+                                    image_loader::thumbnail_pixbuf_rgba(&bytes, 160, 160)
+                                        .or_else(|| {
+                                            image_loader::thumbnail_rgba_fallback(&bytes, 160, 160)
+                                        })
+                                });
+                                if let Some((w, h, rgba)) = thumb {
+                                    crate::thumb_cache::store(&path, idx, w, h, &rgba);
+                                    if thumb_res_tx.send((gen, idx, w, h, rgba)).is_err() {
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            });
 
             let (page_tx, page_cmd_rx) = std::sync::mpsc::channel::<PageCmd>();
             let (page_res_tx, page_res_rx) = std::sync::mpsc::channel::<PageResult>();
@@ -497,7 +623,7 @@ impl Ui {
             let r = ui.clone();
             glib::timeout_add_local(Duration::from_millis(30), move || {
                 let mut u = r.borrow_mut();
-                while let Ok((g, idx, w, h, rgba)) = thumb_rx.try_recv() {
+                while let Ok((g, idx, w, h, rgba)) = thumb_res_rx.try_recv() {
                     if g != u.state.thumb_gen {
                         continue;
                     }
@@ -509,6 +635,9 @@ impl Ui {
                 while let Ok(res) = page_res_rx.try_recv() {
                     u.apply_page_result(res);
                 }
+                // Keep the thumbnail wanted-set in sync (navigation + sidebar
+                // scrolling) without any reentrancy-prone signal handlers.
+                u.refresh_thumb_wanted();
                 glib::ControlFlow::Continue
             });
         }
@@ -925,6 +1054,7 @@ impl Ui {
                         self.window.set_title(Some(&format!("{name} — MComix3")));
                         self.update_status();
                         self.record_position();
+                        self.pause_thumbs(false);
                         self.spawn_thumbnails();
                         self.request_pages(ScrollDest::Start);
                     }
@@ -989,6 +1119,7 @@ impl Ui {
         };
         if display {
             self.state.page_loading = true;
+            self.pause_thumbs(true);
         } else {
             self.state.prefetching = true;
         }
@@ -1018,6 +1149,7 @@ impl Ui {
         }
 
         self.state.page_loading = false;
+        self.pause_thumbs(false);
         // Drop results that are stale (old archive) or superseded by a newer
         // navigation/transform request.
         if res.gen != self.state.page_gen || res.req != self.state.page_req {
@@ -1390,6 +1522,7 @@ impl Ui {
         }
         self.state.page = idx;
         log::debug!("goto page {} / {}", idx + 1, n);
+        self.refresh_thumb_wanted();
 
         // Fast path: the target page(s) are already decoded in the cache.
         let mut visible = vec![idx];
@@ -1905,19 +2038,13 @@ impl Ui {
         self.thumb_box.remove_all();
         self.state.thumb_cells.clear();
         self.state.thumb_pics.clear();
+        self.state.thumb_wanted_last.clear();
         self.state.thumb_gen += 1;
-        let gen = self.state.thumb_gen;
-        let Some(path) = self.state.path.clone() else {
-            return;
-        };
         let pages = self.state.pages.clone();
-        let Some(tx) = self.state.thumb_tx.clone() else {
-            return;
-        };
 
         // Pre-create one cell per page, in page order, with an empty picture
-        // placeholder. Thumbnails fill these in as they decode, so the sidebar
-        // is a stable, correctly numbered list from the start.
+        // placeholder. Thumbnails fill these in lazily as the manager decodes
+        // the wanted set (window around the current page + visible viewport).
         for idx in 0..pages.len() {
             let (cell, pic) = self.make_thumb_cell(idx);
             self.state.thumb_cells.push(Some(cell.clone()));
@@ -1925,77 +2052,90 @@ impl Ui {
             self.thumb_box.insert(&cell, -1);
         }
         self.follow_thumbnail(self.state.page);
+        self.refresh_thumb_wanted();
+    }
 
-        // Generation order: the currently open page first, then expand
-        // outward (+1, -1, +2, -2, ...) so thumbnails near the reading
-        // position are ready immediately when the user navigates.
-        let total = pages.len();
-        let cur = self.state.page.min(total - 1);
-        let mut order: Vec<usize> = Vec::with_capacity(total);
-        let mut seen = vec![false; total];
-        order.push(cur);
-        seen[cur] = true;
-        for step in 1..total {
-            let nxt = cur as isize + step as isize;
-            if nxt >= 0 && (nxt as usize) < total && !seen[nxt as usize] {
-                seen[nxt as usize] = true;
+    /// Recompute the set of pages whose thumbnails are wanted (a window
+    /// around the current page plus the visible thumbnail viewport) and send
+    /// it to the lazy manager in priority order (current page outward first).
+    fn refresh_thumb_wanted(&mut self) {
+        let n = self.state.pages.len();
+        if n == 0 {
+            return;
+        }
+        let Some(tx) = self.state.thumb_tx.clone() else {
+            return;
+        };
+        let page = self.state.page;
+        let window = 32usize;
+
+        let mut wanted: std::collections::BTreeSet<usize> = std::collections::BTreeSet::new();
+        let lo = page.saturating_sub(window);
+        let hi = (page + window).min(n - 1);
+        for i in lo..=hi {
+            wanted.insert(i);
+        }
+        // Visible thumbnail viewport (with a preload margin).
+        let adj = self.thumb_scroll.vadjustment();
+        let cell_h = (self.state.prefs.thumbnail_size as f64 + 22.0).max(40.0);
+        let margin = 8isize;
+        let first = (adj.value() / cell_h).floor() as isize - margin;
+        let last = ((adj.value() + adj.page_size()) / cell_h).ceil() as isize + margin;
+        for i in first.max(0)..=(last.min(n as isize - 1)) {
+            wanted.insert(i as usize);
+        }
+        if wanted == self.state.thumb_wanted_last {
+            return;
+        }
+        self.state.thumb_wanted_last = wanted.clone();
+
+        // Priority order: current page outward, then remaining (ascending).
+        let mut order: Vec<usize> = Vec::with_capacity(wanted.len());
+        let mut seen: std::collections::HashSet<usize> = std::collections::HashSet::new();
+        order.push(page);
+        seen.insert(page);
+        for step in 1..=window {
+            let nxt = page as isize + step as isize;
+            if nxt >= 0 && (nxt as usize) < n
+                && wanted.contains(&(nxt as usize))
+                && seen.insert(nxt as usize)
+            {
                 order.push(nxt as usize);
             }
-            let prev = cur as isize - step as isize;
-            if prev >= 0 && (prev as usize) < total && !seen[prev as usize] {
-                seen[prev as usize] = true;
+            let prev = page as isize - step as isize;
+            if prev >= 0 && (prev as usize) < n
+                && wanted.contains(&(prev as usize))
+                && seen.insert(prev as usize)
+            {
                 order.push(prev as usize);
             }
         }
-        let order = std::sync::Arc::new(order);
+        for &i in wanted.iter() {
+            if seen.insert(i) {
+                order.push(i);
+            }
+        }
 
-        // Parallel generation: several workers each open their own archive
-        // handle and claim the next page index from the shared order.
-        let n_threads = std::thread::available_parallelism()
-            .map(|n| n.get())
-            .unwrap_or(1)
-            .min(4);
-        let next_pos = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        for _ in 0..n_threads {
-            let tx = tx.clone();
-            let path = path.clone();
-            let pages = pages.clone();
-            let order = order.clone();
-            let next_pos = next_pos.clone();
-            std::thread::spawn(move || {
-                let mut ar = match archive::open(&path) {
-                    Ok(a) => a,
-                    Err(e) => {
-                        warn!("thumbnail worker cannot open {}: {e}", path.display());
-                        return;
-                    }
-                };
-                if let Err(e) = ar.page_names() {
-                    warn!("thumbnail worker listing failed: {e}");
-                    return;
-                }
-                loop {
-                    let pos = next_pos.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    let Some(&idx) = order.get(pos) else {
-                        break;
-                    };
-                    if let Some(name) = pages.get(idx) {
-                        if let Ok(bytes) = ar.read(name) {
-                            // gdk-pixbuf scaled decode (fast), pure-Rust fallback.
-                            let thumb = crate::thumb_cache::load(&path, idx).or_else(|| {
-                                image_loader::thumbnail_pixbuf_rgba(&bytes, 160, 160)
-                                    .or_else(|| image_loader::thumbnail_rgba_fallback(&bytes, 160, 160))
-                            });
-                            if let Some((w, h, rgba)) = thumb {
-                                crate::thumb_cache::store(&path, idx, w, h, &rgba);
-                                if tx.send((gen, idx, w, h, rgba)).is_err() {
-                                    return;
-                                }
-                            }
-                        }
-                    }
-                }
-            });
+        let path = self.state.path.clone().unwrap_or_default();
+        let pages = self.state.pages.clone();
+        let gen = self.state.thumb_gen;
+        log::debug!(
+            "thumbnails: {} wanted around page {page} (of {n})",
+            order.len()
+        );
+        let _ = tx.send(ThumbCmd::SetWanted {
+            gen,
+            path,
+            pages,
+            indices: order,
+        });
+    }
+
+    /// Pause/resume the thumbnail manager (paused while a page decodes so
+    /// navigation always gets the CPU first).
+    fn pause_thumbs(&mut self, pause: bool) {
+        if let Some(tx) = self.state.thumb_tx.clone() {
+            let _ = tx.send(ThumbCmd::Pause(pause));
         }
     }
 
