@@ -123,8 +123,7 @@ Windows notes:
 
 ## What's next (suggested order)
 
-1. **Bookmarks** (serde JSON; port `bookmark_backend.py` + dialogs).
-2. **Library** (rusqlite backend; port `mcomix/library/*`).
+1. **Library** (rusqlite backend; port `mcomix/library/*`).
 3. **Recursive archives, image enhancement, magnifying lens, OSD, openwith.**
 4. **i18n** (reuse the existing `.po` files via gettext-rs).
 5. **AppImage** for a truly standalone Linux distribution.

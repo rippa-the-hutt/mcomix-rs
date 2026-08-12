@@ -146,6 +146,8 @@ pub struct AppState {
     pub prefetch_gen: u64,
     /// Configurable keyboard bindings.
     pub bindings: crate::keybindings::BindingMap,
+    /// Bookmarks store.
+    pub bookmarks: crate::bookmarks::Bookmarks,
 }
 
 impl Default for AppState {
@@ -195,6 +197,7 @@ impl Default for AppState {
             prefetching: false,
             prefetch_gen: 0,
             bindings: crate::keybindings::BindingMap::load(),
+            bookmarks: crate::bookmarks::Bookmarks::load(),
             thumb_cells: Vec::new(),
             thumb_pics: Vec::new(),
             thumb_wanted_last: std::collections::BTreeSet::new(),
@@ -222,6 +225,8 @@ pub struct Ui {
     pub btn_rotate: gtk::Button,
     pub btn_library: gtk::Button,
     pub btn_prefs: gtk::Button,
+    pub btn_bookmarks: gtk::MenuButton,
+    pub bookmarks_popover: gtk::Popover,
     pub btn_double: gtk::ToggleButton,
     pub btn_manga: gtk::ToggleButton,
     pub btn_slideshow: gtk::ToggleButton,
@@ -321,6 +326,13 @@ impl Ui {
 
         let sep3 = gtk::Separator::new(gtk::Orientation::Vertical);
         toolbar.append(&sep3);
+
+        let btn_bookmarks = gtk::MenuButton::new();
+        btn_bookmarks.set_icon_name("bookmark-new");
+        btn_bookmarks.set_tooltip_text(Some("Bookmarks"));
+        toolbar.append(&btn_bookmarks);
+        let bookmarks_popover = gtk::Popover::new();
+        btn_bookmarks.set_popover(Some(&bookmarks_popover));
 
         let btn_library = gtk::Button::from_icon_name("folder");
         btn_library.set_tooltip_text(Some("Library (not ported yet)"));
@@ -434,6 +446,8 @@ impl Ui {
             btn_rotate,
             btn_library,
             btn_prefs,
+            btn_bookmarks,
+            bookmarks_popover,
             btn_double,
             btn_manga,
             btn_slideshow,
@@ -444,6 +458,7 @@ impl Ui {
         }));
 
         ui.borrow().connect_signals(ui.clone());
+        ui.borrow_mut().rebuild_bookmarks_popover(ui.clone());
 
         // Persistent thumbnail channel + main-loop poller.
         // Background page-decoder channel + worker, created once for the app
@@ -1435,6 +1450,8 @@ impl Ui {
             }
             A::ShowInfo => self.show_info_panel(),
             A::Minimize => self.window.minimize(),
+            A::AddBookmark => self.add_bookmark(rc),
+            A::EditBookmarks => self.edit_bookmarks(rc),
             A::ExitFullscreen => {
                 if self.window.is_fullscreen() {
                     self.window.unfullscreen();
@@ -2181,6 +2198,248 @@ impl Ui {
             }
         }
         None
+    }
+
+    // ================= bookmarks =================
+
+    /// Rebuild the bookmark menu (popover content).
+    fn rebuild_bookmarks_popover(&mut self, rc: Rc<RefCell<Ui>>) {
+        let boxv = gtk::Box::new(gtk::Orientation::Vertical, 2);
+        boxv.set_margin_top(6);
+        boxv.set_margin_bottom(6);
+        boxv.set_margin_start(6);
+        boxv.set_margin_end(6);
+        boxv.set_width_request(260);
+
+        let add = gtk::Button::with_label("Add Bookmark");
+        add.set_halign(gtk::Align::Fill);
+        {
+            let r = rc.clone();
+            add.connect_clicked(move |_| {
+                r.borrow_mut().add_bookmark(r.clone());
+            });
+        }
+        boxv.append(&add);
+
+        let edit = gtk::Button::with_label("Edit Bookmarks…");
+        edit.set_halign(gtk::Align::Fill);
+        {
+            let r = rc.clone();
+            edit.connect_clicked(move |_| {
+                r.borrow_mut().edit_bookmarks(r.clone());
+            });
+        }
+        boxv.append(&edit);
+
+        let items = self.state.bookmarks.items.clone();
+        if !items.is_empty() {
+            boxv.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+            for b in &items {
+                let label = format!("{}  ({} / {})", b.name, b.page, b.numpages);
+                let btn = gtk::Button::with_label(&label);
+                btn.set_halign(gtk::Align::Fill);
+                btn.set_tooltip_text(Some(&b.path));
+                let bookmark = b.clone();
+                let r = rc.clone();
+                btn.connect_clicked(move |_| {
+                    r.borrow_mut().open_bookmark(bookmark.clone());
+                });
+                boxv.append(&btn);
+            }
+        }
+
+        // Wrap in a scroller only for long lists; short lists get the plain
+        // box so no scrollbar appears and the popover sizes to its content.
+        if items.len() > 12 {
+            let scroller = gtk::ScrolledWindow::new();
+            scroller.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Automatic);
+            scroller.set_child(Some(&boxv));
+            scroller.set_max_content_height(420);
+            self.bookmarks_popover.set_child(Some(&scroller));
+        } else {
+            self.bookmarks_popover.set_child(Some(&boxv));
+        }
+        self.btn_bookmarks.set_popover(Some(&self.bookmarks_popover));
+    }
+
+    /// Add the currently viewed page to the bookmarks. If the same file
+    /// already has bookmarks, ask whether to replace them (mirrors
+    /// `bookmark_backend.add_current_to_bookmarks`).
+    pub fn add_bookmark(&mut self, rc: Rc<RefCell<Ui>>) {
+        let Some(path) = self.state.path.clone() else {
+            return;
+        };
+        let name = path
+            .file_name()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let page = (self.state.page + 1) as u32;
+        let numpages = self.state.pages.len() as u32;
+        let archive_type = crate::archive::detect(&path).map(|k| k.to_string());
+        let date_added = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let path_str = path.to_string_lossy().into_owned();
+
+        let same: Vec<u32> = self
+            .state
+            .bookmarks
+            .same_path(&path_str)
+            .iter()
+            .map(|b| b.page)
+            .collect();
+
+        let bm = crate::bookmarks::Bookmark {
+            name,
+            path: path_str.clone(),
+            page,
+            numpages,
+            archive_type,
+            date_added,
+        };
+
+        if same.is_empty() {
+            self.state.bookmarks.add(bm);
+            self.rebuild_bookmarks_popover(rc);
+            return;
+        }
+
+        let pages_list = same.iter().map(|p| p.to_string()).collect::<Vec<_>>().join(", ");
+        let (plural, verb) = if same.len() > 1 { ("s", "them") } else { ("", "it") };
+        let dlg = gtk::AlertDialog::builder()
+            .message(format!("Replace existing bookmark{plural} on page{plural} {pages_list}?"))
+            .detail(format!(
+                "The current book already contains marked page{plural}. Do you want to replace {verb} with a new bookmark on page {page}?"
+            ))
+            .build();
+        dlg.set_buttons(&["Yes", "No", "Cancel"]);
+        let r = rc.clone();
+        dlg.choose(Some(&self.window), None::<&gio::Cancellable>, move |res| {
+            let idx = res.unwrap_or(2);
+            let mut ui = r.borrow_mut();
+            match idx {
+                0 => {
+                    ui.state.bookmarks.remove_path(&path_str);
+                    ui.state.bookmarks.add(bm.clone());
+                }
+                1 => {
+                    ui.state.bookmarks.add(bm.clone());
+                }
+                _ => {}
+            }
+            ui.rebuild_bookmarks_popover(r.clone());
+        });
+    }
+
+    /// Jump to a bookmarked file+page.
+    pub fn open_bookmark(&mut self, b: crate::bookmarks::Bookmark) {
+        let path = PathBuf::from(&b.path);
+        if self.state.path.as_deref() == Some(path.as_path()) {
+            self.goto_index(b.page.saturating_sub(1) as usize, ScrollDest::Start);
+        } else {
+            self.open_path_with_page(path, b.page);
+        }
+    }
+
+    /// Edit-bookmarks dialog: list with per-row Remove plus Clear all.
+    pub fn edit_bookmarks(&mut self, rc: Rc<RefCell<Ui>>) {
+        let dlg = gtk::Window::new();
+        dlg.set_title(Some("Bookmarks"));
+        dlg.set_transient_for(Some(&self.window));
+        dlg.set_modal(true);
+        dlg.set_default_size(520, 420);
+
+        let list = gtk::ListBox::new();
+        let items = self.state.bookmarks.items.clone();
+        for b in &items {
+            let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+            row.set_margin_top(4);
+            row.set_margin_bottom(4);
+            row.set_margin_start(6);
+            row.set_margin_end(6);
+
+            let texts = gtk::Box::new(gtk::Orientation::Vertical, 0);
+            let l1 = gtk::Label::new(Some(&format!(
+                "{} — page {} / {}",
+                b.name, b.page, b.numpages
+            )));
+            l1.set_xalign(0.0);
+            let l2 = gtk::Label::new(Some(&b.path));
+            l2.set_xalign(0.0);
+            l2.set_ellipsize(gtk::pango::EllipsizeMode::End);
+            texts.append(&l1);
+            texts.append(&l2);
+            row.append(&texts);
+
+            let remove = gtk::Button::with_label("Remove");
+            row.append(&remove);
+
+            let row_widget: gtk::Widget = row.upcast();
+            list.append(&row_widget);
+
+            let r = rc.clone();
+            let (path, page) = (b.path.clone(), b.page);
+            let list = list.clone();
+            let dlg = dlg.clone();
+            remove.connect_clicked(move |_| {
+                let mut ui = r.borrow_mut();
+                ui.state.bookmarks.remove(&path, page);
+                ui.rebuild_bookmarks_popover(r.clone());
+                list.remove(&row_widget);
+                if ui.state.bookmarks.items.is_empty() {
+                    dlg.close();
+                }
+            });
+        }
+
+        let scroller = gtk::ScrolledWindow::new();
+        scroller.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Automatic);
+        scroller.set_child(Some(&list));
+
+        let clear = gtk::Button::with_label("Clear all");
+        let close = gtk::Button::with_label("Close");
+        let footer = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        footer.set_halign(gtk::Align::End);
+        footer.set_margin_top(8);
+        footer.set_margin_bottom(8);
+        footer.set_margin_start(16);
+        footer.set_margin_end(16);
+        footer.append(&clear);
+        footer.append(&close);
+
+        let vbox = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        vbox.append(&scroller);
+        vbox.append(&footer);
+        dlg.set_child(Some(&vbox));
+
+        let r = rc.clone();
+        let dlg2 = dlg.clone();
+        clear.connect_clicked(move |_| {
+            let mut ui = r.borrow_mut();
+            ui.state.bookmarks.clear();
+            ui.rebuild_bookmarks_popover(r.clone());
+            dlg2.close();
+        });
+        let dlg3 = dlg.clone();
+        close.connect_clicked(move |_| dlg3.close());
+        dlg.connect_close_request(|_| glib::Propagation::Proceed);
+
+        // Escape closes.
+        let esc = gtk::EventControllerKey::new();
+        esc.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let dlg_esc = dlg.clone();
+        esc.connect_key_pressed(move |_c, keyval, _code, _state| {
+            if keyval == gdk::Key::Escape {
+                dlg_esc.close();
+                glib::Propagation::Stop
+            } else {
+                glib::Propagation::Proceed
+            }
+        });
+        dlg.add_controller(esc);
+
+        dlg.present();
     }
 
     // ================= persistence / misc =================

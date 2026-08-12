@@ -5,6 +5,7 @@
 
 mod app;
 mod archive;
+mod bookmarks;
 mod image_loader;
 mod keybindings;
 mod lastread;

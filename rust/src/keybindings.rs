@@ -54,6 +54,8 @@ pub enum Action {
     ShowInfo,
     Minimize,
     ExitFullscreen,
+    AddBookmark,
+    EditBookmarks,
 }
 
 impl Action {
@@ -98,6 +100,8 @@ impl Action {
             ShowInfo => "osd_panel",
             Minimize => "minimize",
             ExitFullscreen => "exit_fullscreen",
+            AddBookmark => "add_bookmark",
+            EditBookmarks => "edit_bookmarks",
         }
     }
 
@@ -142,6 +146,8 @@ impl Action {
             ShowInfo => "Show info panel",
             Minimize => "Minimize",
             ExitFullscreen => "Exit fullscreen",
+            AddBookmark => "Add bookmark",
+            EditBookmarks => "Edit bookmarks…",
         }
     }
 
@@ -153,7 +159,7 @@ impl Action {
             ZoomOriginal, FitBest, FitWidth, FitHeight, FitSize, FitManual, Rotate90, Rotate270,
             Rotate180, FlipH, FlipV, ToggleDoublePage, ToggleManga, ToggleFullscreen,
             ToggleThumbnails, ToggleSlideshow, ToggleHideAll, ToggleMenubar, InvertScroll,
-            ShowInfo, Minimize, ExitFullscreen,
+            ShowInfo, Minimize, ExitFullscreen, AddBookmark, EditBookmarks,
         ]
     }
 }
@@ -267,6 +273,8 @@ impl BindingMap {
             ("osd_panel", &["Tab"]),
             ("minimize", &["n"]),
             ("exit_fullscreen", &["Escape"]),
+            ("add_bookmark", &["<Control>d"]),
+            ("edit_bookmarks", &["<Control>b"]),
         ];
         let mut map = Vec::new();
         for (name, accels) in defs {
