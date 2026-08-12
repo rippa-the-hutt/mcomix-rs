@@ -4,10 +4,11 @@
 use std::io::Cursor;
 
 use image::imageops;
-use image::{ImageFormat, Rgba, RgbaImage};
+use image::{Rgba, RgbaImage};
 use log::warn;
 
 use gtk4::gdk;
+use gdk_pixbuf::prelude::*;
 
 /// Decode raw image bytes into an RGBA8 image.
 pub fn decode_rgba(bytes: &[u8]) -> Result<RgbaImage, String> {
@@ -63,28 +64,68 @@ pub fn thumbnail(img: &RgbaImage, max_w: u32, max_h: u32) -> RgbaImage {
     imageops::resize(img, nw, nh, imageops::FilterType::Triangle)
 }
 
-/// Encode an RGBA image as PNG bytes (used to hand thumbnails to the UI thread).
-pub fn encode_png(img: &RgbaImage) -> Result<Vec<u8>, String> {
-    let mut out = Cursor::new(Vec::new());
-    img.write_to(&mut out, ImageFormat::Png)
-        .map_err(|e| format!("cannot encode PNG: {e}"))?;
-    Ok(out.into_inner())
-}
+/// Build a small RGBA thumbnail using gdk-pixbuf's scaled decoding.
+///
+/// This is the same trick the Python app uses: for JPEG (and other formats
+/// with decoder-side scaling) the image is decoded at reduced resolution, so
+/// thumbnails are far cheaper than a full decode + resize. Returns
+/// `(width, height, tight RGBA8 pixels)`.
+pub fn thumbnail_pixbuf_rgba(bytes: &[u8], max_w: u32, max_h: u32) -> Option<(u32, u32, Vec<u8>)> {
+    // Load through a PixbufLoader with a size hint: JPEG is decoded at
+    // reduced resolution (libjpeg DCT scaling), which is the big speedup.
+    let loader = gdk_pixbuf::PixbufLoader::new();
+    loader.set_size(max_w as i32, max_h as i32);
+    loader.write(bytes).ok()?;
+    loader.close().ok()?;
+    let mut pb = loader.pixbuf()?;
 
-/// Decode PNG bytes (from the thumbnail thread) into a texture.
-pub fn texture_from_png_bytes(bytes: &[u8]) -> Option<gdk::Texture> {
-    match decode_rgba(bytes) {
-        Ok(img) => Some(texture_from_rgba(&img)),
-        Err(e) => {
-            warn!("thumbnail decode failed: {e}");
-            None
+    // Loaders that ignore the size hint (e.g. PNG) produce a full-size
+    // pixbuf; scale it down explicitly.
+    let (w, h) = (pb.width(), pb.height());
+    if w > max_w as i32 || h > max_h as i32 {
+        let scale = ((max_w as f64 / w as f64).min(max_h as f64 / h as f64)).min(1.0);
+        let nw = ((w as f64) * scale).max(1.0) as i32;
+        let nh = ((h as f64) * scale).max(1.0) as i32;
+        pb = pb.scale_simple(nw, nh, gdk_pixbuf::InterpType::Bilinear)?;
+    }
+
+    let w = pb.width() as u32;
+    let h = pb.height() as u32;
+    let stride = pb.rowstride() as usize;
+    let nch = pb.n_channels() as usize;
+    let src = pb.pixel_bytes()?;
+    let src = src.as_ref();
+    let mut rgba = vec![0u8; (w as usize) * (h as usize) * 4];
+    if nch == 4 && stride == (w as usize) * 4 {
+        let n = rgba.len();
+        rgba.copy_from_slice(&src[..n]);
+    } else {
+        for y in 0..h as usize {
+            for x in 0..w as usize {
+                let si = y * stride + x * nch;
+                let di = (y * (w as usize) + x) * 4;
+                rgba[di] = src[si];
+                rgba[di + 1] = src[si + 1];
+                rgba[di + 2] = src[si + 2];
+                rgba[di + 3] = if nch == 4 { src[si + 3] } else { 255 };
+            }
         }
     }
+    Some((w, h, rgba))
+}
+
+/// Fallback thumbnail via the pure-Rust `image` crate (used when gdk-pixbuf
+/// cannot decode the format, e.g. some WebP/TIFF variants).
+pub fn thumbnail_rgba_fallback(bytes: &[u8], max_w: u32, max_h: u32) -> Option<(u32, u32, Vec<u8>)> {
+    let img = decode_rgba(bytes).ok()?;
+    let thumb = thumbnail(&img, max_w, max_h);
+    let (w, h) = thumb.dimensions();
+    Some((w, h, thumb.into_raw()))
 }
 
 /// True if the format looks animated (GIF/WebP with animation). MComix has an
 /// animation mode preference; v1 always renders the first frame.
-pub fn format_hint(bytes: &[u8]) -> Option<ImageFormat> {
+pub fn format_hint(bytes: &[u8]) -> Option<image::ImageFormat> {
     image::guess_format(bytes).ok()
 }
 
@@ -92,4 +133,45 @@ pub fn format_hint(bytes: &[u8]) -> Option<ImageFormat> {
 pub fn checker_color(alpha: u8) -> Rgba<u8> {
     let _ = alpha;
     Rgba([0xcc, 0xcc, 0xcc, 0xff])
+}
+
+#[cfg(test)]
+mod bench {
+    use super::*;
+    use std::time::Instant;
+
+    fn load_image(name: &str) -> Vec<u8> {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("test")
+            .join("files")
+            .join("images")
+            .join(name);
+        std::fs::read(path).expect("read test image")
+    }
+
+    #[test]
+    #[ignore]
+    fn thumbnail_speed() {
+        let names = ["landscape-no-exif.jpg", "portrait-no-exif.jpg", "pattern.jpg"];
+        for name in names {
+            let bytes = load_image(name);
+            let n = 200;
+            let t0 = Instant::now();
+            for _ in 0..n {
+                let _ = thumbnail_pixbuf_rgba(&bytes, 160, 160);
+            }
+            let t1 = Instant::now();
+            for _ in 0..n {
+                let _ = thumbnail_rgba_fallback(&bytes, 160, 160);
+            }
+            let t2 = Instant::now();
+            eprintln!(
+                "{name}: gdk-pixbuf {:?} vs image-crate {:?} ({:.1}x)",
+                t1 - t0,
+                t2 - t1,
+                (t2 - t1).as_secs_f64() / (t1 - t0).as_secs_f64().max(1e-9)
+            );
+        }
+    }
 }

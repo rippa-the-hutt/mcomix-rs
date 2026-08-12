@@ -1069,6 +1069,7 @@ dependencies = [
  "directories",
  "env_logger",
  "flate2",
+ "gdk-pixbuf",
  "gio",
  "glib",
  "gtk4",

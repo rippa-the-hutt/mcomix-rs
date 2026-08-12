@@ -88,8 +88,15 @@ pub struct AppState {
     pub sizes: Vec<(u32, u32)>,
     /// Generation counter for the thumbnail worker; stale results are dropped.
     pub thumb_gen: u64,
-    /// Sender for thumbnail bytes produced by the worker thread.
-    pub thumb_tx: Option<std::sync::mpsc::Sender<(u64, usize, Vec<u8>)>>,
+    /// Sender for thumbnail pixels produced by the worker thread
+    /// (generation, page index, width, height, tight RGBA8 data).
+    pub thumb_tx: Option<std::sync::mpsc::Sender<(u64, usize, u32, u32, Vec<u8>)>>,
+    /// Page index -> thumbnail cell. Cells are pre-created in page order so
+    /// the sidebar is stable while thumbnails load; images fill in via
+    /// `thumb_pics`.
+    pub thumb_cells: Vec<Option<gtk::Box>>,
+    /// Page index -> thumbnail picture widget (filled as thumbnails arrive).
+    pub thumb_pics: Vec<Option<gtk::Picture>>,
     /// Last viewport size we laid out for (avoids redraw loops).
     pub last_viewport: Option<(i32, i32)>,
     /// Visibility of chrome elements before fullscreen hid them.
@@ -123,6 +130,8 @@ pub struct AppState {
     pub prefetching: bool,
     /// Bumped when transforms invalidate the cache (stale prefetches dropped).
     pub prefetch_gen: u64,
+    /// Configurable keyboard bindings.
+    pub bindings: crate::keybindings::BindingMap,
 }
 
 impl Default for AppState {
@@ -171,6 +180,9 @@ impl Default for AppState {
             prefetch_queue: std::collections::VecDeque::new(),
             prefetching: false,
             prefetch_gen: 0,
+            bindings: crate::keybindings::BindingMap::load(),
+            thumb_cells: Vec::new(),
+            thumb_pics: Vec::new(),
         }
     }
 }
@@ -422,7 +434,7 @@ impl Ui {
         // Background page-decoder channel + worker, created once for the app
         // lifetime (the worker re-opens the archive when the path changes).
         {
-            let (thumb_tx, thumb_rx) = std::sync::mpsc::channel::<(u64, usize, Vec<u8>)>();
+            let (thumb_tx, thumb_rx) = std::sync::mpsc::channel::<(u64, usize, u32, u32, Vec<u8>)>();
             ui.borrow_mut().state.thumb_tx = Some(thumb_tx);
 
             let (page_tx, page_cmd_rx) = std::sync::mpsc::channel::<PageCmd>();
@@ -485,11 +497,12 @@ impl Ui {
             let r = ui.clone();
             glib::timeout_add_local(Duration::from_millis(30), move || {
                 let mut u = r.borrow_mut();
-                while let Ok((g, idx, png)) = thumb_rx.try_recv() {
+                while let Ok((g, idx, w, h, rgba)) = thumb_rx.try_recv() {
                     if g != u.state.thumb_gen {
                         continue;
                     }
-                    if let Some(tex) = image_loader::texture_from_png_bytes(&png) {
+                    if let Some(img) = image::RgbaImage::from_raw(w, h, rgba) {
+                        let tex = image_loader::texture_from_rgba(&img);
                         u.add_thumb(idx, &tex);
                     }
                 }
@@ -576,7 +589,19 @@ impl Ui {
             let r = rc.clone();
             move |_| {
                 let ui = r.borrow();
-                ui.notice("The preferences dialog has not been ported yet; edit preferences.conf by hand (see PORTING.md).");
+                let prefs = ui.state.prefs.clone();
+                let window = ui.window.clone();
+                drop(ui);
+                let rc2 = r.clone();
+                crate::prefs_dialog::show_dialog(
+                    &window,
+                    &prefs,
+                    Rc::new(move |p: &crate::prefs::Prefs| {
+                        let mut ui = rc2.borrow_mut();
+                        ui.apply_prefs(p);
+                        ui.state.bindings = crate::keybindings::BindingMap::load();
+                    }),
+                );
             }
         });
 
@@ -666,14 +691,14 @@ impl Ui {
         self.thumb_box.connect_child_activated({
             let r = rc.clone();
             move |_fb, child| {
-                let idx = child.index();
-                if idx >= 0 {
-                    r.borrow_mut().goto_index(idx as usize, ScrollDest::Start);
+                let mut ui = r.borrow_mut();
+                if let Some(idx) = ui.page_of_child(&child) {
+                    ui.goto_index(idx, ScrollDest::Start);
                 }
             }
         });
 
-        // ---- keyboard ----
+        // ---- keyboard (configurable bindings) ----
         // Capture phase: handle keys before any focused child widget can
         // consume them, so navigation always works.
         let key_ctrl = gtk::EventControllerKey::new();
@@ -681,179 +706,10 @@ impl Ui {
         let r = rc.clone();
         key_ctrl.connect_key_pressed(move |_c, keyval, _code, state| {
             let mut ui = r.borrow_mut();
-            let shift = state.contains(gdk::ModifierType::SHIFT_MASK);
-            let ctrl = state.contains(gdk::ModifierType::CONTROL_MASK);
-            let alt = state.contains(gdk::ModifierType::ALT_MASK);
-            use gdk::Key as K;
-            let handled = match keyval {
-                K::Page_Down | K::KP_Page_Down => {
-                    if shift {
-                        ui.next_page(10);
-                    } else {
-                        ui.next_page(1);
-                    }
-                    true
-                }
-                K::Page_Up | K::KP_Page_Up | K::BackSpace => {
-                    if shift {
-                        ui.next_page(-10);
-                    } else {
-                        ui.next_page(-1);
-                    }
-                    true
-                }
-                K::space => {
-                    if shift {
-                        ui.smart_scroll_up();
-                    } else {
-                        ui.smart_scroll_down();
-                    }
-                    true
-                }
-                K::Home | K::KP_Home => {
-                    ui.first_page();
-                    true
-                }
-                K::End | K::KP_End => {
-                    ui.last_page();
-                    true
-                }
-                K::g => {
-                    ui.page_select_dialog(r.clone());
-                    true
-                }
-                K::d => {
-                    ui.toggle_double_page();
-                    true
-                }
-                K::s if ctrl => {
-                    ui.toggle_slideshow(r.clone());
-                    true
-                }
-                K::m if ctrl => {
-                    ui.toggle_menubar();
-                    true
-                }
-                K::m => {
-                    ui.toggle_manga();
-                    true
-                }
-                K::b => {
-                    ui.set_fit_mode(zoom::ZOOM_MODE_BEST);
-                    true
-                }
-                K::w => {
-                    ui.set_fit_mode(zoom::ZOOM_MODE_WIDTH);
-                    true
-                }
-                K::h => {
-                    ui.set_fit_mode(zoom::ZOOM_MODE_HEIGHT);
-                    true
-                }
-                K::s => {
-                    ui.set_fit_mode(zoom::ZOOM_MODE_SIZE);
-                    true
-                }
-                K::a => {
-                    ui.set_fit_mode(zoom::ZOOM_MODE_MANUAL);
-                    true
-                }
-                K::x => {
-                    ui.state.prefs.invert_smart_scroll = !ui.state.prefs.invert_smart_scroll;
-                    true
-                }
-                K::plus | K::KP_Add | K::equal => {
-                    ui.zoom_in();
-                    true
-                }
-                K::minus | K::KP_Subtract => {
-                    ui.zoom_out();
-                    true
-                }
-                K::_0 | K::KP_0 => {
-                    ui.zoom_original();
-                    true
-                }
-                K::r => {
-                    if shift {
-                        ui.rotate_270();
-                    } else {
-                        ui.rotate_90();
-                    }
-                    true
-                }
-                K::f | K::F11 => {
-                    ui.toggle_fullscreen();
-                    true
-                }
-                K::Escape => {
-                    if ui.window.is_fullscreen() {
-                        ui.window.unfullscreen();
-                    } else if ui.state.prefs.escape_quits {
-                        ui.window.close();
-                    }
-                    true
-                }
-                K::n => {
-                    ui.window.minimize();
-                    true
-                }
-                K::Tab => {
-                    ui.show_info_panel();
-                    true
-                }
-                K::F9 => {
-                    ui.toggle_thumbnails();
-                    true
-                }
-                K::i => {
-                    ui.toggle_hide_all();
-                    true
-                }
-                K::Down | K::KP_Down => {
-                    ui.scroll_down();
-                    true
-                }
-                K::Up | K::KP_Up => {
-                    ui.scroll_up();
-                    true
-                }
-                K::Right | K::KP_Right => {
-                    if alt {
-                        ui.next_page(1);
-                    } else if ui.h_scrollable() {
-                        if ui.state.manga {
-                            ui.scroll_left();
-                        } else {
-                            ui.scroll_right();
-                        }
-                    } else if ui.state.manga {
-                        ui.next_page(-1);
-                    } else {
-                        ui.next_page(1);
-                    }
-                    true
-                }
-                K::Left | K::KP_Left => {
-                    if alt {
-                        ui.next_page(-1);
-                    } else if ui.h_scrollable() {
-                        if ui.state.manga {
-                            ui.scroll_right();
-                        } else {
-                            ui.scroll_left();
-                        }
-                    } else if ui.state.manga {
-                        ui.next_page(1);
-                    } else {
-                        ui.next_page(-1);
-                    }
-                    true
-                }
-                _ => false,
-            };
-            log::debug!("key event {:?} -> handled={handled}", keyval.name());
-            if handled {
+            let action = ui.state.bindings.lookup(keyval, state);
+            log::debug!("key event {:?} -> {:?}", keyval.name(), action);
+            if let Some(action) = action {
+                ui.handle_action(action, r.clone());
                 glib::Propagation::Stop
             } else {
                 glib::Propagation::Proceed
@@ -1381,6 +1237,102 @@ impl Ui {
             .set_text(&format!("Page {page} / {n}    {w} × {h} px    {fname}"));
     }
 
+    /// Execute a keyboard-bound action.
+    pub fn handle_action(&mut self, action: crate::keybindings::Action, rc: Rc<RefCell<Ui>>) {
+        use crate::keybindings::Action as A;
+        match action {
+            A::NextPage => self.next_page(1),
+            A::PrevPage => self.next_page(-1),
+            A::NextPage10 => self.next_page(10),
+            A::PrevPage10 => self.next_page(-10),
+            A::FirstPage => self.first_page(),
+            A::LastPage => self.last_page(),
+            A::GoToPage => self.page_select_dialog(rc),
+            A::ScrollUp => self.scroll_up(),
+            A::ScrollDown => self.scroll_down(),
+            A::ScrollLeft => {
+                if self.h_scrollable() {
+                    if self.state.manga {
+                        self.scroll_right();
+                    } else {
+                        self.scroll_left();
+                    }
+                } else if self.state.manga {
+                    self.next_page(1);
+                } else {
+                    self.next_page(-1);
+                }
+            }
+            A::ScrollRight => {
+                if self.h_scrollable() {
+                    if self.state.manga {
+                        self.scroll_left();
+                    } else {
+                        self.scroll_right();
+                    }
+                } else if self.state.manga {
+                    self.next_page(-1);
+                } else {
+                    self.next_page(1);
+                }
+            }
+            A::SmartScrollUp => self.smart_scroll_up(),
+            A::SmartScrollDown => self.smart_scroll_down(),
+            A::ZoomIn => self.zoom_in(),
+            A::ZoomOut => self.zoom_out(),
+            A::ZoomOriginal => self.zoom_original(),
+            A::FitBest => self.set_fit_mode(zoom::ZOOM_MODE_BEST),
+            A::FitWidth => self.set_fit_mode(zoom::ZOOM_MODE_WIDTH),
+            A::FitHeight => self.set_fit_mode(zoom::ZOOM_MODE_HEIGHT),
+            A::FitSize => self.set_fit_mode(zoom::ZOOM_MODE_SIZE),
+            A::FitManual => self.set_fit_mode(zoom::ZOOM_MODE_MANUAL),
+            A::Rotate90 => self.rotate_90(),
+            A::Rotate270 => self.rotate_270(),
+            A::Rotate180 => self.rotate_180(),
+            A::FlipH => self.flip_horizontally(),
+            A::FlipV => self.flip_vertically(),
+            A::ToggleDoublePage => self.toggle_double_page(),
+            A::ToggleManga => self.toggle_manga(),
+            A::ToggleFullscreen => self.toggle_fullscreen(),
+            A::ToggleThumbnails => self.toggle_thumbnails(),
+            A::ToggleSlideshow => self.toggle_slideshow(rc),
+            A::ToggleHideAll => self.toggle_hide_all(),
+            A::ToggleMenubar => self.toggle_menubar(),
+            A::InvertScroll => {
+                self.state.prefs.invert_smart_scroll = !self.state.prefs.invert_smart_scroll;
+            }
+            A::ShowInfo => self.show_info_panel(),
+            A::Minimize => self.window.minimize(),
+            A::ExitFullscreen => {
+                if self.window.is_fullscreen() {
+                    self.window.unfullscreen();
+                } else if self.state.prefs.escape_quits {
+                    self.window.close();
+                }
+            }
+        }
+    }
+
+    /// Apply new preference values (from the preferences dialog) to the UI.
+    pub fn apply_prefs(&mut self, new: &crate::prefs::Prefs) {
+        self.state.prefs = new.clone();
+        self.state.prefs.save();
+        self.state.zoom.fit_mode = self.state.prefs.zoom_mode;
+        self.state.zoom.scale_up = self.state.prefs.scale_up;
+        self.zoom_dropdown
+            .set_selected(self.state.prefs.zoom_mode.clamp(0, 4) as u32);
+        apply_background_css(&self.state.prefs);
+        let policy = if self.state.prefs.show_scrollbar {
+            gtk::PolicyType::Automatic
+        } else {
+            gtk::PolicyType::Never
+        };
+        self.scrolled.set_policy(policy, policy);
+        self.thumb_scroll.set_visible(self.state.prefs.show_thumbnails);
+        self.sync_toggles();
+        self.redraw_force();
+    }
+
     // ================= navigation =================
 
     pub fn next_page(&mut self, n: i32) {
@@ -1499,11 +1451,17 @@ impl Ui {
     /// to the proportional position so it still "follows" the current page.
     fn follow_thumbnail(&mut self, idx: usize) {
         let total = self.state.pages.len().max(1);
-        if let Some(child) = self.thumb_box.child_at_index(idx as i32) {
-            self.thumb_box.select_child(&child);
+        if let Some(cell) = self.state.thumb_cells.get(idx).and_then(|c| c.as_ref()) {
+            if let Some(child) = cell
+                .parent()
+                .and_then(|p| p.downcast::<gtk::FlowBoxChild>().ok())
+            {
+                self.thumb_box.select_child(&child);
+            }
             self.scroll_thumb_into_view(idx);
             return;
         }
+        // Not generated yet: approximate scroll position.
         let adj = self.thumb_scroll.vadjustment();
         let upper = adj.upper();
         let page = adj.page_size();
@@ -1516,7 +1474,13 @@ impl Ui {
     /// Scroll the thumbnail sidebar so the thumbnail at `idx` is visible.
     /// (gtk4-rs 0.9 has no gtk_widget_scroll_to, so we move the vadjustment.)
     fn scroll_thumb_into_view(&mut self, idx: usize) {
-        let Some(child) = self.thumb_box.child_at_index(idx as i32) else {
+        let Some(cell) = self.state.thumb_cells.get(idx).and_then(|c| c.as_ref()) else {
+            return;
+        };
+        let Some(child) = cell
+            .parent()
+            .and_then(|p| p.downcast::<gtk::FlowBoxChild>().ok())
+        else {
             return;
         };
         let alloc = child.allocation();
@@ -1585,8 +1549,13 @@ impl Ui {
         if target < 0 || target >= names.len() as i32 {
             return false;
         }
-        info!("opening sibling archive: {}", names[target as usize]);
-        self.open_path(PathBuf::from(&names[target as usize]));
+        let path = PathBuf::from(&names[target as usize]);
+        info!("opening sibling archive: {}", path.display());
+        // Going forward, start at the first page; going backward, start at
+        // the last page (open_path_with_page clamps to the last page for
+        // oversized page numbers).
+        let start_page = if delta < 0 { u32::MAX } else { 1 };
+        self.open_path_with_page(path, start_page);
         true
     }
 
@@ -1874,6 +1843,20 @@ impl Ui {
         cancel.connect_clicked(move |_| dlg_cancel.close());
         dlg.connect_close_request(|_| glib::Propagation::Proceed);
 
+        // Escape closes the dialog.
+        let esc = gtk::EventControllerKey::new();
+        esc.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let dlg_esc = dlg.clone();
+        esc.connect_key_pressed(move |_c, keyval, _code, _state| {
+            if keyval == gdk::Key::Escape {
+                dlg_esc.close();
+                glib::Propagation::Stop
+            } else {
+                glib::Propagation::Proceed
+            }
+        });
+        dlg.add_controller(esc);
+
         dlg.present();
     }
 
@@ -1920,6 +1903,8 @@ impl Ui {
 
     fn spawn_thumbnails(&mut self) {
         self.thumb_box.remove_all();
+        self.state.thumb_cells.clear();
+        self.state.thumb_pics.clear();
         self.state.thumb_gen += 1;
         let gen = self.state.thumb_gen;
         let Some(path) = self.state.path.clone() else {
@@ -1930,38 +1915,95 @@ impl Ui {
             return;
         };
 
-        std::thread::spawn(move || {
-            let mut ar = match archive::open(&path) {
-                Ok(a) => a,
-                Err(e) => {
-                    warn!("thumbnail worker cannot open {}: {e}", path.display());
+        // Pre-create one cell per page, in page order, with an empty picture
+        // placeholder. Thumbnails fill these in as they decode, so the sidebar
+        // is a stable, correctly numbered list from the start.
+        for idx in 0..pages.len() {
+            let (cell, pic) = self.make_thumb_cell(idx);
+            self.state.thumb_cells.push(Some(cell.clone()));
+            self.state.thumb_pics.push(Some(pic));
+            self.thumb_box.insert(&cell, -1);
+        }
+        self.follow_thumbnail(self.state.page);
+
+        // Generation order: the currently open page first, then expand
+        // outward (+1, -1, +2, -2, ...) so thumbnails near the reading
+        // position are ready immediately when the user navigates.
+        let total = pages.len();
+        let cur = self.state.page.min(total - 1);
+        let mut order: Vec<usize> = Vec::with_capacity(total);
+        let mut seen = vec![false; total];
+        order.push(cur);
+        seen[cur] = true;
+        for step in 1..total {
+            let nxt = cur as isize + step as isize;
+            if nxt >= 0 && (nxt as usize) < total && !seen[nxt as usize] {
+                seen[nxt as usize] = true;
+                order.push(nxt as usize);
+            }
+            let prev = cur as isize - step as isize;
+            if prev >= 0 && (prev as usize) < total && !seen[prev as usize] {
+                seen[prev as usize] = true;
+                order.push(prev as usize);
+            }
+        }
+        let order = std::sync::Arc::new(order);
+
+        // Parallel generation: several workers each open their own archive
+        // handle and claim the next page index from the shared order.
+        let n_threads = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1)
+            .min(4);
+        let next_pos = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        for _ in 0..n_threads {
+            let tx = tx.clone();
+            let path = path.clone();
+            let pages = pages.clone();
+            let order = order.clone();
+            let next_pos = next_pos.clone();
+            std::thread::spawn(move || {
+                let mut ar = match archive::open(&path) {
+                    Ok(a) => a,
+                    Err(e) => {
+                        warn!("thumbnail worker cannot open {}: {e}", path.display());
+                        return;
+                    }
+                };
+                if let Err(e) = ar.page_names() {
+                    warn!("thumbnail worker listing failed: {e}");
                     return;
                 }
-            };
-            if let Err(e) = ar.page_names() {
-                warn!("thumbnail worker listing failed: {e}");
-                return;
-            }
-            for (idx, name) in pages.iter().enumerate() {
-                if let Ok(bytes) = ar.read(name) {
-                    if let Ok(img) = image_loader::decode_rgba(&bytes) {
-                        let thumb = image_loader::thumbnail(&img, 160, 160);
-                        if let Ok(png) = image_loader::encode_png(&thumb) {
-                            if tx.send((gen, idx, png)).is_err() {
-                                break;
+                loop {
+                    let pos = next_pos.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let Some(&idx) = order.get(pos) else {
+                        break;
+                    };
+                    if let Some(name) = pages.get(idx) {
+                        if let Ok(bytes) = ar.read(name) {
+                            // gdk-pixbuf scaled decode (fast), pure-Rust fallback.
+                            let thumb = crate::thumb_cache::load(&path, idx).or_else(|| {
+                                image_loader::thumbnail_pixbuf_rgba(&bytes, 160, 160)
+                                    .or_else(|| image_loader::thumbnail_rgba_fallback(&bytes, 160, 160))
+                            });
+                            if let Some((w, h, rgba)) = thumb {
+                                crate::thumb_cache::store(&path, idx, w, h, &rgba);
+                                if tx.send((gen, idx, w, h, rgba)).is_err() {
+                                    return;
+                                }
                             }
                         }
                     }
                 }
-            }
-        });
+            });
+        }
     }
 
-    fn add_thumb(&mut self, idx: usize, tex: &gdk::Texture) {
+    /// Build an (empty) thumbnail cell: picture placeholder + page number.
+    fn make_thumb_cell(&self, idx: usize) -> (gtk::Box, gtk::Picture) {
         let size = self.state.prefs.thumbnail_size.max(40) as i32;
         let cell = gtk::Box::new(gtk::Orientation::Vertical, 2);
         let pic = gtk::Picture::new();
-        pic.set_paintable(Some(tex));
         pic.set_can_shrink(true);
         pic.set_content_fit(gtk::ContentFit::Contain);
         pic.set_size_request(size, size);
@@ -1974,16 +2016,31 @@ impl Ui {
         if let Some(name) = self.state.pages.get(idx) {
             cell.set_tooltip_text(Some(name));
         }
-        self.thumb_box.insert(&cell, -1);
-        if idx == self.state.page {
-            if let Some(child) = cell
-                .parent()
-                .and_then(|p| p.downcast::<gtk::FlowBoxChild>().ok())
-            {
-                self.thumb_box.select_child(&child);
-            }
-            self.scroll_thumb_into_view(idx);
+        (cell, pic)
+    }
+
+    /// Fill the pre-created cell for page `idx` with its decoded thumbnail.
+    fn add_thumb(&mut self, idx: usize, tex: &gdk::Texture) {
+        if let Some(pic) = self.state.thumb_pics.get(idx).and_then(|p| p.as_ref()) {
+            pic.set_paintable(Some(tex));
         }
+        if idx == self.state.page {
+            self.follow_thumbnail(idx);
+        }
+    }
+
+    /// Find the page index of a FlowBoxChild (by matching its cell widget).
+    fn page_of_child(&self, child: &gtk::FlowBoxChild) -> Option<usize> {
+        for (idx, cell) in self.state.thumb_cells.iter().enumerate() {
+            if let Some(cell) = cell {
+                if let Some(parent) = cell.parent() {
+                    if parent.downcast::<gtk::FlowBoxChild>().ok().as_ref() == Some(child) {
+                        return Some(idx);
+                    }
+                }
+            }
+        }
+        None
     }
 
     // ================= persistence / misc =================

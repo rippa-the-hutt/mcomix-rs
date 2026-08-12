@@ -6,10 +6,13 @@
 mod app;
 mod archive;
 mod image_loader;
+mod keybindings;
 mod lastread;
 mod lru;
 mod natsort;
 mod prefs;
+mod prefs_dialog;
+mod thumb_cache;
 mod zoom;
 
 use std::path::PathBuf;

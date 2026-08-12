@@ -50,14 +50,14 @@ rust/
 | `image_tools.py` | `image_loader.rs` | ✅ core; enhancers ⏳ |
 | `zoom.py` | `zoom.rs` | ✅ core |
 | `layout.py` + `scrolling.py` (smart scroll) | `app.rs` (percentage smart scroll) | 🟡 basic smart scroll; full layout engine later |
-| `thumbbar.py`, `thumbnail_tools.py` | `app.rs` async thumbnails | ✅ basic |
+| `thumbbar.py`, `thumbnail_tools.py` | `app.rs` + `thumb_cache.rs` | ✅ parallel generation + gdk-pixbuf scaled decode + on-disk cache |
 | `slideshow.py` | `app.rs` | ✅ basic |
 | `preferences.py` | `prefs.rs` | ✅ (JSON, same keys) |
-| `preferences_dialog.py` | — | ⏳ next |
+| `preferences_dialog.py` | `prefs_dialog.rs` | ✅ (Appearance/Behaviour/Display/Scrolling/Shortcuts tabs) |
 | `last_read_page.py` | `lastread.rs` | ✅ (JSON instead of sqlite) |
 | `bookmark_backend.py` + dialogs | — | ⏳ next (serde JSON) |
 | `library/*` (sqlite book DB) | — | ⏳ later (rusqlite) |
-| `keybindings.py` + editor | `app.rs` (hard-coded defaults) | 🟡 partial; editor ⏳ |
+| `keybindings.py` + editor | `keybindings.rs` + Shortcuts tab | ✅ configurable (JSON `keybindings.conf`) |
 | `enhance_backend.py` (contrast/brightness…) | — | ⏳ later (`image` ops) |
 | `lens.py` (magnifier) | — | ⏳ later (overlay) |
 | `osd.py` | `app.rs` status/OSD-lite | 🟡 partial |
@@ -123,11 +123,10 @@ Windows notes:
 
 ## What's next (suggested order)
 
-1. **Preferences dialog + keybinding editor** (mirror `preferences_dialog.py`).
-2. **Bookmarks** (serde JSON; port `bookmark_backend.py` + dialogs).
-3. **Library** (rusqlite backend; port `mcomix/library/*`).
-4. **Recursive archives, image enhancement, magnifying lens, OSD, openwith.**
-5. **i18n** (reuse the existing `.po` files via gettext-rs).
-6. **AppImage** for a truly standalone Linux distribution.
-7. **PDF polish**: port the optimal-DPI trace pass from `pdf_external.py`.
-8. **Full smart-scroll layout engine** (port `layout.py`/`scrolling.py` box model).
+1. **Bookmarks** (serde JSON; port `bookmark_backend.py` + dialogs).
+2. **Library** (rusqlite backend; port `mcomix/library/*`).
+3. **Recursive archives, image enhancement, magnifying lens, OSD, openwith.**
+4. **i18n** (reuse the existing `.po` files via gettext-rs).
+5. **AppImage** for a truly standalone Linux distribution.
+6. **PDF polish**: port the optimal-DPI trace pass from `pdf_external.py`.
+7. **Full smart-scroll layout engine** (port `layout.py`/`scrolling.py` box model).
