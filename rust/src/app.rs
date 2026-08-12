@@ -725,8 +725,7 @@ impl Ui {
         self.btn_library.connect_clicked({
             let r = rc.clone();
             move |_| {
-                let ui = r.borrow();
-                ui.notice("The library has not been ported yet; it is planned for a later milestone.");
+                crate::library_dialog::show_library(r.clone());
             }
         });
         self.btn_prefs.connect_clicked({
@@ -2464,6 +2463,13 @@ impl Ui {
             self.state.prefs.page_of_last_file = page;
             self.state.prefs.save();
             LastReadDb::set(&path, page);
+            // Keep the library's "recent" table in sync (if the library DB
+            // has ever been used).
+            if crate::library::LibraryDb::db_path().exists() {
+                if let Ok(mut db) = crate::library::LibraryDb::open() {
+                    db.record_recent(&path.to_string_lossy(), page);
+                }
+            }
             self.state.last_save = Some(std::time::Instant::now());
         }
     }

@@ -56,7 +56,7 @@ rust/
 | `preferences_dialog.py` | `prefs_dialog.rs` | ✅ (Appearance/Behaviour/Display/Scrolling/Shortcuts tabs) |
 | `last_read_page.py` | `lastread.rs` | ✅ (JSON instead of sqlite) |
 | `bookmark_backend.py` + dialogs | — | ⏳ next (serde JSON) |
-| `library/*` (sqlite book DB) | — | ⏳ later (rusqlite) |
+| `library/*` (sqlite book DB) | `library.rs` + `library_dialog.rs` | ✅ rusqlite backend (books/collections/recent/watchlist) + library window |
 | `keybindings.py` + editor | `keybindings.rs` + Shortcuts tab | ✅ configurable (JSON `keybindings.conf`) |
 | `enhance_backend.py` (contrast/brightness…) | — | ⏳ later (`image` ops) |
 | `lens.py` (magnifier) | — | ⏳ later (overlay) |

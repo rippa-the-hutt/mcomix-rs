@@ -9,6 +9,8 @@ mod bookmarks;
 mod image_loader;
 mod keybindings;
 mod lastread;
+mod library;
+mod library_dialog;
 mod lru;
 mod natsort;
 mod prefs;
