@@ -139,6 +139,9 @@ pub struct AppState {
     pub page_dest: Option<ScrollDest>,
     /// Last time the last-read position was persisted (throttled).
     pub last_save: Option<std::time::Instant>,
+    /// Accumulated edge presses used by the scroll-with-flipping protection
+    /// (mirrors Python's `_extra_scroll_events`).
+    pub scroll_edge_presses: i32,
     /// LRU cache of decoded page textures (mirrors `max pages to cache`).
     pub cache: crate::lru::LruCache<usize, (gdk::Texture, u32, u32)>,
     /// Pages to prefetch in the background, in priority order.
@@ -192,6 +195,7 @@ impl Default for AppState {
             page_pending: None,
             page_dest: None,
             last_save: None,
+            scroll_edge_presses: 0,
             cache: crate::lru::LruCache::new(
                 cache_capacity,
                 384 * 1024 * 1024, // ~384 MB of decoded pages
@@ -1600,6 +1604,7 @@ impl Ui {
             return;
         }
         self.state.page = idx;
+        self.state.scroll_edge_presses = 0;
         log::debug!("goto page {} / {}", idx + 1, n);
         self.show_osd(&format!("Page {} / {n}", idx + 1));
         self.refresh_thumb_wanted();
@@ -1981,12 +1986,31 @@ impl Ui {
         let adj = self.scrolled.vadjustment();
         let px = self.state.prefs.number_of_pixels_to_scroll_per_key_event as f64;
         let upper = adj.upper() - adj.page_size();
-        // At the top edge of a zoomed-in page, go to the previous page (which
-        // is shown from the bottom, see ScrollDest::End).
-        if self.state.prefs.flip_with_wheel && adj.value() - px <= 1.0 && upper > 0.0 {
-            self.next_page(-1);
+        if upper <= 0.0 {
+            // Page fits the viewport: flip immediately (Python: not scrollable).
+            if self.state.prefs.flip_with_wheel {
+                self.next_page(-1);
+            }
+            return;
+        }
+        if adj.value() - px <= 1.0 {
+            // At the top edge of a zoomed-in page: flip after N edge presses
+            // (mirrors Python's _previous_page_with_protection).
+            if !self.state.prefs.flip_with_wheel {
+                self.state.scroll_edge_presses = 0;
+                return;
+            }
+            let n = self.state.prefs.number_of_key_presses_before_page_turn.max(1) as i32;
+            if self.state.scroll_edge_presses <= -(n - 1) {
+                self.state.scroll_edge_presses = 0;
+                // Previous page is shown from the bottom (see ScrollDest::End).
+                self.next_page(-1);
+            } else {
+                self.state.scroll_edge_presses = (self.state.scroll_edge_presses - 1).min(-1);
+            }
         } else {
             adj.set_value(adj.value() - px);
+            self.state.scroll_edge_presses = 0;
         }
     }
 
@@ -1994,10 +2018,30 @@ impl Ui {
         let adj = self.scrolled.vadjustment();
         let px = self.state.prefs.number_of_pixels_to_scroll_per_key_event as f64;
         let upper = adj.upper() - adj.page_size();
-        if self.state.prefs.flip_with_wheel && adj.value() + px >= upper - 1.0 && upper > 0.0 {
-            self.next_page(1);
+        if upper <= 0.0 {
+            // Page fits the viewport: flip immediately (Python: not scrollable).
+            if self.state.prefs.flip_with_wheel {
+                self.next_page(1);
+            }
+            return;
+        }
+        if adj.value() + px >= upper - 1.0 {
+            // At the bottom edge of a zoomed-in page: flip after N edge presses
+            // (mirrors Python's _next_page_with_protection).
+            if !self.state.prefs.flip_with_wheel {
+                self.state.scroll_edge_presses = 0;
+                return;
+            }
+            let n = self.state.prefs.number_of_key_presses_before_page_turn.max(1) as i32;
+            if self.state.scroll_edge_presses >= n - 1 {
+                self.state.scroll_edge_presses = 0;
+                self.next_page(1);
+            } else {
+                self.state.scroll_edge_presses = (self.state.scroll_edge_presses + 1).max(1);
+            }
         } else {
             adj.set_value(adj.value() + px);
+            self.state.scroll_edge_presses = 0;
         }
     }
 

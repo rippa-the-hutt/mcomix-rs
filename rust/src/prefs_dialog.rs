@@ -116,6 +116,7 @@ struct PrefsForm {
     pixels_key: gtk::SpinButton,
     pixels_wheel: gtk::SpinButton,
     smart_pct: gtk::SpinButton,
+    edge_presses: gtk::SpinButton,
     flip_with_wheel: gtk::CheckButton,
     invert_scroll: gtk::CheckButton,
     scale_up: gtk::CheckButton,
@@ -158,6 +159,7 @@ impl PrefsForm {
             pixels_key: spin(p.number_of_pixels_to_scroll_per_key_event as f64, 0.0, 500.0, 5.0, 0),
             pixels_wheel: spin(p.number_of_pixels_to_scroll_per_mouse_wheel_event as f64, 0.0, 500.0, 5.0, 0),
             smart_pct: spin(p.smart_scroll_percentage, 0.05, 1.0, 0.05, 2),
+            edge_presses: spin(p.number_of_key_presses_before_page_turn as f64, 1.0, 10.0, 1.0, 0),
             flip_with_wheel: check("Flip page with mouse wheel at page edges", p.flip_with_wheel),
             invert_scroll: check("Invert smart scroll", p.invert_smart_scroll),
             scale_up: check("Allow upscaling small images in fit modes", p.scale_up),
@@ -228,6 +230,7 @@ impl PrefsForm {
         add_row(&grid, "Pixels per key event:", Some(&self.pixels_key), &mut row);
         add_row(&grid, "Pixels per wheel event:", Some(&self.pixels_wheel), &mut row);
         add_row(&grid, "Smart scroll step (fraction of viewport):", Some(&self.smart_pct), &mut row);
+        add_row(&grid, "Key presses before page turn at edges:", Some(&self.edge_presses), &mut row);
         add_row(&grid, "", Some(&self.flip_with_wheel), &mut row);
         add_row(&grid, "", Some(&self.invert_scroll), &mut row);
         add_row(&grid, "", Some(&self.scale_up), &mut row);
@@ -275,6 +278,7 @@ impl PrefsForm {
         p.number_of_pixels_to_scroll_per_key_event = self.pixels_key.value() as u32;
         p.number_of_pixels_to_scroll_per_mouse_wheel_event = self.pixels_wheel.value() as u32;
         p.smart_scroll_percentage = self.smart_pct.value();
+        p.number_of_key_presses_before_page_turn = self.edge_presses.value() as u32;
         p.flip_with_wheel = self.flip_with_wheel.is_active();
         p.invert_smart_scroll = self.invert_scroll.is_active();
         p.scale_up = self.scale_up.is_active();
