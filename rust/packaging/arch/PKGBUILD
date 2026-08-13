@@ -40,6 +40,10 @@ sha256sums=('SKIP')
 prepare() {
     cd "${srcdir}/mcomix-rs/rust"
     cargo fetch --locked
+    # makepkg.conf injects heavy debuginfo/force-frame-pointers flags; stacked
+    # on the crate's LTO + codegen-units=1 they OOM in constrained chroots.
+    # Use the crate's own release profile (strip=true) instead.
+    export RUSTFLAGS=""
 }
 
 build() {
