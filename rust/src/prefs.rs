@@ -225,16 +225,98 @@ impl Prefs {
 
     pub fn load() -> Prefs {
         let path = Self::path();
-        match fs::read_to_string(&path) {
-            Ok(text) => match serde_json::from_str(&text) {
-                Ok(p) => p,
-                Err(e) => {
-                    log::warn!("could not parse preferences file {:?}: {e}; using defaults", path);
-                    Prefs::default()
+        let Ok(text) = fs::read_to_string(&path) else {
+            return Prefs::default();
+        };
+        // Start from the full defaults and overlay only the keys actually
+        // present in the file. This keeps correct values for fields added
+        // after an older preferences.conf was written (plain `#[serde(default)]`
+        // would fill missing fields with the *type* default, e.g. false/0).
+        let Ok(map) = serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&text)
+        else {
+            log::warn!("could not parse preferences file {:?}; using defaults", path);
+            return Prefs::default();
+        };
+        let mut p = Prefs::default();
+        macro_rules! ov {
+            ($f:ident) => {
+                if let Some(v) = map.get(stringify!($f)) {
+                    if let Ok(x) = serde_json::from_value::<_>(v.clone()) {
+                        p.$f = x;
+                    }
                 }
-            },
-            Err(_) => Prefs::default(),
+            };
         }
+        ov!(zoom_mode);
+        ov!(default_double_page);
+        ov!(default_manga_mode);
+        ov!(default_fullscreen);
+        ov!(fit_to_size_mode);
+        ov!(fit_to_size_px);
+        ov!(rotation);
+        ov!(auto_rotate_from_exif);
+        ov!(auto_rotate_depending_on_size);
+        ov!(scale_up);
+        ov!(stretch);
+        ov!(keep_transformation);
+        ov!(double_step_in_double_page_mode);
+        ov!(virtual_double_page_for_fitting_images);
+        ov!(bg_color);
+        ov!(thumb_bg_color);
+        ov!(smart_bg);
+        ov!(smart_thumb_bg);
+        ov!(thumbnail_bg_uses_main_color);
+        ov!(checkered_bg_for_transparent_images);
+        ov!(show_menubar);
+        ov!(show_toolbar);
+        ov!(show_statusbar);
+        ov!(show_thumbnails);
+        ov!(show_scrollbar);
+        ov!(hide_all);
+        ov!(hide_all_in_fullscreen);
+        ov!(statusbar_fields);
+        ov!(thumbnail_size);
+        ov!(show_page_numbers_on_thumbnails);
+        ov!(create_thumbnails);
+        ov!(number_of_pixels_to_scroll_per_key_event);
+        ov!(number_of_pixels_to_scroll_per_mouse_wheel_event);
+        ov!(smart_scroll);
+        ov!(invert_smart_scroll);
+        ov!(smart_scroll_percentage);
+        ov!(flip_with_wheel);
+        ov!(wrap_mouse_scroll);
+        ov!(escape_quits);
+        ov!(auto_open_next_archive);
+        ov!(auto_open_next_directory);
+        ov!(slideshow_delay);
+        ov!(slideshow_can_go_to_next_archive);
+        ov!(auto_load_last_file);
+        ov!(page_of_last_file);
+        ov!(path_to_last_file);
+        ov!(store_recent_file_info);
+        ov!(sort_archive_by);
+        ov!(sort_archive_order);
+        ov!(sort_by);
+        ov!(sort_order);
+        ov!(cache);
+        ov!(max_pages_to_cache);
+        ov!(scaling_quality);
+        ov!(animation_mode);
+        ov!(openwith_commands);
+        ov!(brightness);
+        ov!(contrast);
+        ov!(auto_contrast);
+        ov!(show_osd);
+        ov!(lens_size);
+        ov!(lens_magnification);
+        ov!(language);
+        ov!(ask_resume_from_last_page);
+        ov!(number_of_key_presses_before_page_turn);
+        ov!(window_x);
+        ov!(window_y);
+        ov!(window_width);
+        ov!(window_height);
+        p
     }
 
     pub fn save(&self) {
@@ -252,5 +334,41 @@ impl Prefs {
             }
             Err(e) => log::warn!("cannot serialize preferences: {e}"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_fields_keep_defaults() {
+        // A config written before newer fields existed must keep the
+        // defaults for those fields (e.g. ask_resume_from_last_page = true).
+        let text = r#"{"zoom_mode": 4, "window_width": 800}"#;
+        let map: serde_json::Map<String, serde_json::Value> =
+            serde_json::from_str(text).unwrap();
+        let mut p = Prefs::default();
+        macro_rules! ov {
+            ($f:ident) => {
+                if let Some(v) = map.get(stringify!($f)) {
+                    if let Ok(x) = serde_json::from_value::<_>(v.clone()) {
+                        p.$f = x;
+                    }
+                }
+            };
+        }
+        ov!(zoom_mode);
+        ov!(window_width);
+        ov!(ask_resume_from_last_page);
+        ov!(show_osd);
+        ov!(lens_size);
+        ov!(brightness);
+        assert_eq!(p.zoom_mode, 4);
+        assert_eq!(p.window_width, 800);
+        assert!(p.ask_resume_from_last_page, "missing bool keeps default true");
+        assert!(p.show_osd, "missing bool keeps default true");
+        assert_eq!(p.lens_size, 200);
+        assert!((p.brightness - 1.0).abs() < 1e-9);
     }
 }

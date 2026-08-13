@@ -1161,12 +1161,17 @@ impl Ui {
             .build();
         dlg.set_buttons(&[&crate::i18n::tr("Yes"), &crate::i18n::tr("No")]);
         let rc2 = rc.clone();
-        dlg.choose(Some(&self.window), None::<&gio::Cancellable>, move |res| {
-            let idx = res.unwrap_or(1);
-            if idx == 0 {
-                let mut ui = rc2.borrow_mut();
-                ui.goto_index(saved.saturating_sub(1) as usize, ScrollDest::Start);
-            }
+        let win = self.window.clone();
+        // Defer until the main loop runs and the window is presented, so the
+        // dialog reliably shows even when this is triggered during startup.
+        glib::idle_add_local_once(move || {
+            dlg.choose(Some(&win), None::<&gio::Cancellable>, move |res| {
+                let idx = res.unwrap_or(1);
+                if idx == 0 {
+                    let mut ui = rc2.borrow_mut();
+                    ui.goto_index(saved.saturating_sub(1) as usize, ScrollDest::Start);
+                }
+            });
         });
     }
 
