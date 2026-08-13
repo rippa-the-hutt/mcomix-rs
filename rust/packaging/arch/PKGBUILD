@@ -1,15 +1,13 @@
 # Maintainer: Rippa The Hutt <iacoporippagmail@duck.com>
-# Builds the Rust port (mcomix-rs) straight from the project's git tag:
-#
-#   makepkg -si
-#
-# (pkgver must match an existing tag in the repository, e.g. v0.1.0)
+# Binary package: downloads the prebuilt Linux artifact from the GitHub
+# release and installs it (no compilation). Bump pkgver to match a published
+# release tag (e.g. v0.1.0).
 
 pkgname=mcomix-rs
 pkgver=0.1.0
 pkgrel=1
 pkgdesc="A user-friendly, customizable comic book image viewer (Rust/GTK4 port)"
-arch=('x86_64' 'aarch64')
+arch=('x86_64')
 url="https://github.com/rippa-the-hutt/mcomix-rs"
 license=('GPL2')
 depends=(
@@ -26,54 +24,33 @@ optdepends=(
     'p7zip: for 7Zip/LHA archive support'
     'mupdf-tools: for PDF support'
 )
-makedepends=(
-    'git'
-    'rust'
-    'pkg-config'
-    'desktop-file-utils'
-    'shared-mime-info'
+source=(
+    # The prebuilt x86_64 Linux binary from the release.
+    "mcomix-rs-${pkgver}-x86_64-unknown-linux-gnu.tar.gz::https://github.com/rippa-the-hutt/mcomix-rs/releases/download/v${pkgver}/mcomix-rs-${pkgver}-x86_64-unknown-linux-gnu.tar.gz"
+    # The source archive at the same tag, for the .desktop/MIME/icons.
+    "mcomix-rs-src-${pkgver}.tar.gz::https://github.com/rippa-the-hutt/mcomix-rs/archive/refs/tags/v${pkgver}.tar.gz"
 )
-# Fetch the source from the git tag (the crate lives in rust/).
-source=("mcomix-rs::git+https://github.com/rippa-the-hutt/mcomix-rs.git#tag=v${pkgver}")
-sha256sums=('SKIP')
-
-prepare() {
-    cd "${srcdir}/mcomix-rs/rust"
-    cargo fetch --locked
-}
-
-build() {
-    cd "${srcdir}/mcomix-rs/rust"
-    # makepkg.conf injects heavy debuginfo/force-frame-pointers flags; stacked
-    # on the crate's LTO + codegen-units=1 they OOM in constrained chroots.
-    # Use the crate's own release profile (strip=true) instead. (makepkg runs
-    # each function in its own subshell, so this must be set here, not in
-    # prepare().)
-    export RUSTFLAGS=""
-    cargo build --release --locked
-}
-
-check() {
-    cd "${srcdir}/mcomix-rs/rust"
-    export RUSTFLAGS=""
-    cargo test --release --locked
-}
+sha256sums=('SKIP' 'SKIP')
 
 package() {
-    cd "${srcdir}/mcomix-rs/rust"
+    # Binary from the release artifact.
+    install -Dm755 "${srcdir}/mcomix-rs" "${pkgdir}/usr/bin/mcomix-rs"
 
-    install -Dm755 target/release/mcomix-rs "${pkgdir}/usr/bin/mcomix-rs"
+    # Data files from the source archive (locate it robustly; GitHub archive
+    # dirs are named <repo>-<tag>).
+    local linuxdir
+    linuxdir="$(dirname "$(find "${srcdir}" -path '*/packaging/linux/mcomix-rs.desktop' | head -1)")"
 
-    install -Dm644 packaging/linux/mcomix-rs.desktop \
+    install -Dm644 "${linuxdir}/mcomix-rs.desktop" \
         "${pkgdir}/usr/share/applications/mcomix-rs.desktop"
-    install -Dm644 packaging/linux/mcomix-rs.xml \
+    install -Dm644 "${linuxdir}/mcomix-rs.xml" \
         "${pkgdir}/usr/share/mime/packages/mcomix-rs.xml"
 
     for d in 16x16 22x22 24x24 32x32 48x48 256x256; do
-        install -Dm644 "packaging/linux/icons/${d}/apps/mcomix3.png" \
+        install -Dm644 "${linuxdir}/icons/${d}/apps/mcomix3.png" \
             "${pkgdir}/usr/share/icons/hicolor/${d}/apps/mcomix3.png" 2>/dev/null || true
         for mime in application-x-cbz application-x-cbr application-x-cbt; do
-            install -Dm644 "packaging/linux/icons/${d}/mimetypes/${mime}.png" \
+            install -Dm644 "${linuxdir}/icons/${d}/mimetypes/${mime}.png" \
                 "${pkgdir}/usr/share/icons/hicolor/${d}/mimetypes/${mime}.png" 2>/dev/null || true
         done
     done
