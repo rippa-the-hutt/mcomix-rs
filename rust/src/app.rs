@@ -765,8 +765,6 @@ impl Ui {
             if let Some(p) = path {
                 if start_page > 1 {
                     u.open_path_with_page(p, start_page);
-                } else if prefs.auto_load_last_file {
-                    u.open_path_with_page(p, prefs.page_of_last_file);
                 } else {
                     u.open_path(p, ui.clone());
                 }
@@ -1226,9 +1224,17 @@ impl Ui {
         // Defer until the main loop runs and the window is presented, so the
         // dialog reliably shows even when this is triggered during startup.
         let dlg4 = dlg.clone();
+        let win4 = self.window.clone();
         glib::idle_add_local_once(move || {
-            log::debug!("prompt_resume: showing dialog for page {saved}");
+            log::info!("Resume prompt: continue from page {saved}?");
+            win4.present();
             dlg4.present();
+            // Re-raise shortly after so the dialog ends up above the main
+            // window even if the parent finished mapping after the idle.
+            let dlg5 = dlg4.clone();
+            glib::timeout_add_local_once(Duration::from_millis(400), move || {
+                dlg5.present();
+            });
         });
         let _ = path;
     }
