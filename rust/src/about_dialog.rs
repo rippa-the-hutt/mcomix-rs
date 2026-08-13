@@ -10,7 +10,7 @@ const LOGO_PNG: &[u8] = include_bytes!("../../mcomix/images/mcomix-large.png");
 
 pub fn show_about(parent: &impl IsA<gtk::Window>) {
     let dlg = gtk::Window::new();
-    dlg.set_title(Some("About MComix-rs"));
+    dlg.set_title(Some(&crate::i18n::tr("About MComix-rs")));
     dlg.set_transient_for(Some(parent));
     dlg.set_modal(true);
     dlg.set_resizable(false);
@@ -27,7 +27,7 @@ pub fn show_about(parent: &impl IsA<gtk::Window>) {
     logo.set_content_fit(gtk::ContentFit::Contain);
     logo.set_size_request(128, 128);
 
-    let name = gtk::Label::new(Some("MComix-rs"));
+    let name = gtk::Label::new(Some(&crate::i18n::tr("MComix-rs")));
     name.add_css_class("about-name");
     let version = gtk::Label::new(Some(&format!("Version {}", env!("CARGO_PKG_VERSION"))));
     version.add_css_class("dim-label");

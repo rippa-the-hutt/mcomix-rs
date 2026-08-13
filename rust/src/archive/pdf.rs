@@ -8,10 +8,68 @@ use std::path::{Path, PathBuf};
 
 use super::{Archive, ArchiveError, run_capture, which};
 
-/// Rendering resolution in DPI (72 * 3) — a good balance of quality/speed for
-/// comics. The Python port computes an optimal DPI per page; that refinement
-/// can be ported later if needed.
-const PDF_RENDER_DPI: u32 = 216;
+/// Default DPI used when the trace pass finds no images (72 * 4, as in the
+/// Python port).
+const PDF_RENDER_DPI_DEF: u32 = 288;
+/// Upper cap for the per-page optimal DPI (72 * 10).
+const PDF_RENDER_DPI_MAX: u32 = 720;
+
+/// Extract the value of an XML attribute like `name="value"` from a line.
+fn attr<'a>(line: &'a str, name: &str) -> Option<&'a str> {
+    let pat = format!("{name}=\"");
+    let start = line.find(&pat)? + pat.len();
+    let end = line[start..].find('"')? + start;
+    Some(&line[start..end])
+}
+
+/// The transformation attribute: modern mutool (>= ~1.18) emits `transform=`,
+/// older versions `matrix=`. Take whichever is present.
+fn transform_attr<'a>(line: &'a str) -> Option<&'a str> {
+    attr(line, "transform").or_else(|| attr(line, "matrix"))
+}
+
+/// Compute the optimal render DPI from a mutool trace (`-F trace`), mirroring
+/// `pdf_external.py`: find the largest embedded image and derive the DPI so it
+/// is rendered at its native resolution (capped at PDF_RENDER_DPI_MAX).
+fn parse_optimal_dpi(trace: &str) -> u32 {
+    let mut max_size: u32 = 0;
+    let mut max_dpi: u32 = PDF_RENDER_DPI_DEF;
+    for line in trace.lines() {
+        let line = line.trim();
+        if !line.contains("<fill_image") {
+            continue;
+        }
+        let (Some(matrix), Some(width), Some(height)) = (
+            transform_attr(line),
+            attr(line, "width"),
+            attr(line, "height"),
+        ) else {
+            continue;
+        };
+        let (Ok(width), Ok(height)) = (width.parse::<f64>(), height.parse::<f64>()) else {
+            continue;
+        };
+        let m: Vec<f64> = matrix
+            .split_whitespace()
+            .filter_map(|x| x.parse::<f64>().ok())
+            .collect();
+        if m.len() < 4 {
+            continue;
+        }
+        for (size, c1, c2) in [(width, m[0], m[1]), (height, m[2], m[3])] {
+            let size_u = size as u32;
+            if size_u < max_size {
+                continue;
+            }
+            let render_size = (c1 * c1 + c2 * c2).sqrt();
+            let dpi = (size * 72.0 / render_size) as i64;
+            let dpi = dpi.clamp(72, PDF_RENDER_DPI_MAX as i64) as u32;
+            max_size = size_u;
+            max_dpi = dpi;
+        }
+    }
+    max_dpi
+}
 
 pub struct PdfArchive {
     path: PathBuf,
@@ -20,6 +78,15 @@ pub struct PdfArchive {
 }
 
 impl PdfArchive {
+    /// Optimal DPI for one page: run the mutool trace pass and parse the
+    /// largest embedded image (mirrors `pdf_external.py`).
+    pub fn optimal_dpi(&self, page: &str) -> Result<u32, ArchiveError> {
+        let p = self.path.to_string_lossy().into_owned();
+        let raw = run_capture("mutool", &["draw", "-F", "trace", "--", &p, page])?;
+        let text = String::from_utf8_lossy(&raw);
+        Ok(parse_optimal_dpi(&text))
+    }
+
     pub fn open(path: &Path) -> Result<PdfArchive, ArchiveError> {
         if which("mutool").is_none() {
             return Err(ArchiveError::Other(
@@ -70,7 +137,8 @@ impl Archive for PdfArchive {
             ArchiveError::Other(format!("invalid PDF page name '{name}'"))
         })?;
         let p = self.path.to_string_lossy().into_owned();
-        let dpi = PDF_RENDER_DPI.to_string();
+        let dpi = self.optimal_dpi(page)?.to_string();
+        log::debug!("PDF page {page}: rendering at {dpi} DPI");
         // `mutool draw -F png -r <dpi> -o - -- <pdf> <page>` writes the
         // rendered page to stdout.
         run_capture(
@@ -111,3 +179,24 @@ mod tests {
         assert!(image::guess_format(&bytes).is_ok());
     }
 }
+
+    #[test]
+    fn parses_trace_dpi() {
+        // Modern mutool emits transform=; a 2000px image drawn at 0.5 scale.
+        let trace = "\n  <fill_image transform=\"0.5 0 0 0.5 10 20\" width=\"2000\" height=\"3000\"/>\n";
+        let dpi = parse_optimal_dpi(trace);
+        // dpi = 2000 * 72 / 0.5 = 288000 -> capped at 720
+        assert_eq!(dpi, PDF_RENDER_DPI_MAX);
+
+        // Old mutool used matrix=; also parsed.
+        let trace = "<fill_image matrix=\"1 0 0 1 0 0\" width=\"200\" height=\"300\"/>";
+        // width: 200*72/1 -> capped; height: 300*72/1 -> capped
+        assert_eq!(parse_optimal_dpi(trace), PDF_RENDER_DPI_MAX);
+
+        // A 200x300px image covering 200x300pt (72 dpi scan): native 72 dpi.
+        let trace = "<fill_image transform=\"200 0 0 300 0 0\" width=\"200\" height=\"300\"/>";
+        assert_eq!(parse_optimal_dpi(trace), 72);
+
+        // No images -> default.
+        assert_eq!(parse_optimal_dpi(""), PDF_RENDER_DPI_DEF);
+    }

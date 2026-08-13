@@ -36,8 +36,24 @@ plain image directories — including archives embedded inside archives.
 |---|---|
 | **AppImage** (standalone) | GitHub Releases — download, `chmod +x`, run |
 | **.deb** (Debian/Ubuntu ≥ 24.04) | GitHub Releases, or build with `cargo deb` |
-| **Arch Linux** | `rust/packaging/arch/PKGBUILD` via `makepkg -si` |
+| **Arch Linux (AUR)** | `mcomix-rs` on the AUR — see below |
+| **Arch Linux (manual)** | `rust/packaging/arch/PKGBUILD` via `makepkg -si` |
 | **Tarball** (binary only) | GitHub Releases — needs the GTK4 runtime |
+
+Arch Linux users can install the binary package straight from the
+[AUR](https://aur.archlinux.org/packages/mcomix-rs):
+
+```bash
+# Using yay
+yay -S mcomix-rs
+
+# Using paru
+paru -S mcomix-rs
+```
+
+The AUR package downloads the prebuilt Linux artifact from the GitHub
+release (no compilation), verifies the sha256 checksums, and replaces the
+old Python `mcomix3` package.
 
 ### Windows
 
@@ -58,6 +74,17 @@ cargo build --release
 ./target/release/mcomix-rs "/path/to/comic.cbz"
 ```
 
+Arch Linux:
+
+```bash
+# Arch dependencies
+sudo pacman -S --needed base-devel gtk4 gdk-pixbuf2 glib2 pango cairo xz bzip2
+
+cd rust
+cargo build --release
+./target/release/mcomix-rs "/path/to/comic.cbz"
+```
+
 ### Building the Windows artifacts from Linux (cross-compile)
 
 No Windows machine or runner needed — the portable zip and NSIS installer are
@@ -66,7 +93,13 @@ used as a link sysroot, and `makensis` (which runs natively on Linux):
 
 ```bash
 cd rust
+
+# Debian/Ubuntu
 sudo apt install mingw-w64 nsis zip zstd curl pkg-config
+
+# Arch Linux
+sudo pacman -S --needed mingw-w64-gcc nsis zip zstd curl pkgconf
+
 bash packaging/windows/cross-build-linux.sh
 # -> dist/mcomix-rs-<ver>-windows-x86_64.zip and dist/mcomix-rs-setup-<ver>.exe
 ```

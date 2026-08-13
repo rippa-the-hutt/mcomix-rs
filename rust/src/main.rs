@@ -11,6 +11,7 @@ mod i18n;
 mod image_loader;
 mod keybindings;
 mod lastread;
+mod layout;
 mod library;
 mod library_dialog;
 mod lru;

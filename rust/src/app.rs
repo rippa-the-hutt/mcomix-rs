@@ -155,6 +155,8 @@ pub struct AppState {
     pub prefetch_gen: u64,
     /// Configurable keyboard bindings.
     pub bindings: crate::keybindings::BindingMap,
+    /// Smart-scroll layout engine (rebuilt on every redraw).
+    pub layout: Option<crate::layout::FiniteLayout>,
     /// Magnifying lens enabled.
     pub lens_enabled: bool,
     /// Raw (transformed+enhanced) RGBA of the currently displayed pages
@@ -220,6 +222,7 @@ impl Default for AppState {
             prefetch_gen: 0,
             bindings: crate::keybindings::BindingMap::load(),
             bookmarks: crate::bookmarks::Bookmarks::load(),
+            layout: None,
             lens_enabled: false,
             lens_source: vec![None, None],
             displayed: vec![(0, 0, 0, 0), (0, 0, 0, 0)],
@@ -313,7 +316,7 @@ impl Ui {
             "Best fit", "Fit width", "Fit height", "Fit size", "Manual",
         ]);
         zoom_dropdown.set_selected(state.zoom.fit_mode as u32);
-        zoom_dropdown.set_tooltip_text(Some("Zoom mode"));
+        zoom_dropdown.set_tooltip_text(Some(&crate::i18n::tr("Zoom mode")));
         toolbar.append(&zoom_dropdown);
 
         let btn_zoom_out = gtk::Button::from_icon_name("zoom-out");
@@ -329,19 +332,19 @@ impl Ui {
         toolbar.append(&btn_zoom_orig);
 
         let btn_rotate = gtk::Button::from_icon_name("object-rotate-right");
-        btn_rotate.set_tooltip_text(Some("Rotate 90° clockwise"));
+        btn_rotate.set_tooltip_text(Some(&crate::i18n::tr("Rotate 90° clockwise")));
         toolbar.append(&btn_rotate);
 
         let sep2 = gtk::Separator::new(gtk::Orientation::Vertical);
         toolbar.append(&sep2);
 
-        let btn_double = gtk::ToggleButton::with_label("Two pages");
-        btn_double.set_tooltip_text(Some("Double page mode"));
+        let btn_double = gtk::ToggleButton::with_label(&crate::i18n::tr("Two pages"));
+        btn_double.set_tooltip_text(Some(&crate::i18n::tr("Double page mode")));
         btn_double.set_active(state.double_page);
         toolbar.append(&btn_double);
 
-        let btn_manga = gtk::ToggleButton::with_label("Manga");
-        btn_manga.set_tooltip_text(Some("Manga (right-to-left) mode"));
+        let btn_manga = gtk::ToggleButton::with_label(&crate::i18n::tr("Manga"));
+        btn_manga.set_tooltip_text(Some(&crate::i18n::tr("Manga (right-to-left) mode")));
         btn_manga.set_active(state.manga);
         toolbar.append(&btn_manga);
 
@@ -357,23 +360,23 @@ impl Ui {
 
         let btn_thumbs = gtk::ToggleButton::new();
         btn_thumbs.set_icon_name("view-list-symbolic");
-        btn_thumbs.set_tooltip_text(Some("Thumbnails"));
+        btn_thumbs.set_tooltip_text(Some(&crate::i18n::tr("Thumbnails")));
         btn_thumbs.set_active(state.prefs.show_thumbnails);
         toolbar.append(&btn_thumbs);
 
         let sep3 = gtk::Separator::new(gtk::Orientation::Vertical);
         toolbar.append(&sep3);
 
-        let btn_enhance = gtk::Button::with_label("Enhance");
-        btn_enhance.set_tooltip_text(Some("Enhance image (brightness/contrast)"));
+        let btn_enhance = gtk::Button::with_label(&crate::i18n::tr("Enhance"));
+        btn_enhance.set_tooltip_text(Some(&crate::i18n::tr("Enhance image")));
         toolbar.append(&btn_enhance);
 
-        let btn_lens = gtk::ToggleButton::with_label("Lens");
+        let btn_lens = gtk::ToggleButton::with_label(&crate::i18n::tr("Lens"));
         btn_lens.set_tooltip_text(Some(&crate::i18n::tr("Magnifying lens")));
         toolbar.append(&btn_lens);
 
         let btn_openwith = gtk::Button::from_icon_name("system-run");
-        btn_openwith.set_tooltip_text(Some("Open with…"));
+        btn_openwith.set_tooltip_text(Some(&crate::i18n::tr("Open with…")));
         toolbar.append(&btn_openwith);
 
         let btn_bookmarks = gtk::MenuButton::new();
@@ -382,7 +385,7 @@ impl Ui {
         toolbar.append(&btn_bookmarks);
 
         let btn_about = gtk::Button::from_icon_name("help-about");
-        btn_about.set_tooltip_text(Some("About"));
+        btn_about.set_tooltip_text(Some(&crate::i18n::tr("About")));
         toolbar.append(&btn_about);
 
         let bookmarks_popover = gtk::Popover::new();
@@ -393,7 +396,7 @@ impl Ui {
         toolbar.append(&btn_library);
 
         let btn_prefs = gtk::Button::from_icon_name("preferences-system");
-        btn_prefs.set_tooltip_text(Some("Preferences (not ported yet)"));
+        btn_prefs.set_tooltip_text(Some(&crate::i18n::tr("Preferences")));
         toolbar.append(&btn_prefs);
 
         // Clicking toolbar buttons must not move keyboard focus away from the
@@ -1620,6 +1623,24 @@ impl Ui {
             Vec::new()
         };
 
+        // Build the smart-scroll layout (union-wrapped): drives content
+        // sizing and the smart-scroll grid.
+        let content_sizes: Vec<[i64; 2]> = zoomed
+            .iter()
+            .map(|(w, h)| [*w as i64, *h as i64])
+            .collect();
+        let orientation = if self.state.manga { [-1i64, 1] } else { [1i64, 1] };
+        let layout = crate::layout::FiniteLayout::new(
+            &content_sizes,
+            [vw as i64, vh as i64],
+            orientation,
+            2,
+            false, // wrap_individually (Python's expand_area default)
+            0,     // distribution axis (width)
+            1,     // alignment axis (height)
+        );
+        self.state.layout = Some(layout);
+
         let mut total_w = 0.0_f64;
         let mut total_h = 0.0_f64;
         let mut offset_x = 0.0_f64;
@@ -1655,6 +1676,7 @@ impl Ui {
         let (tw, th) = (total_w.max(1.0) as i32, total_h.max(1.0) as i32);
         self.content.set_size_request(tw, th);
         self.state.last_content = (tw, th);
+        self.update_layout_position();
         self.content.set_direction(if self.state.manga {
             gtk::TextDirection::Rtl
         } else {
@@ -1896,20 +1918,13 @@ impl Ui {
 
     /// Position the viewport: top for forward navigation, bottom for backward.
     fn scroll_to_destination(&mut self, dest: ScrollDest) {
-        let hadj = self.scrolled.hadjustment();
-        let vadj = self.scrolled.vadjustment();
+        use crate::layout::{SCROLL_TO_END, SCROLL_TO_START};
         match dest {
             ScrollDest::Start => {
-                hadj.set_value(0.0);
-                vadj.set_value(0.0);
+                self.goto_predefined([SCROLL_TO_START, SCROLL_TO_START], Some(0));
             }
             ScrollDest::End => {
-                hadj.set_value(0.0);
-                // Use the content size we just laid out: the scrolled window's
-                // adjustment upper is not updated synchronously yet.
-                let max_v =
-                    (self.state.last_content.1 as f64 - vadj.page_size()).max(0.0);
-                vadj.set_value(max_v);
+                self.goto_predefined([SCROLL_TO_END, SCROLL_TO_END], Some(0));
             }
             ScrollDest::Keep => {}
         }
@@ -2304,34 +2319,134 @@ impl Ui {
         adj.set_value(adj.value() + self.state.prefs.number_of_pixels_to_scroll_per_key_event as f64);
     }
 
+    /// Smart scroll forward using the layout engine (Bresenham grid, manga
+    /// orientation, axis swapping). Flips the page (with protection) when the
+    /// content is exhausted.
     pub fn smart_scroll_down(&mut self) {
-        let adj = self.scrolled.vadjustment();
-        let upper = adj.upper() - adj.page_size();
-        let step = (self.scrolled.allocation().height() as f64
-            * self.state.prefs.smart_scroll_percentage)
-            .max(1.0);
-        if adj.value() + step >= upper - 1.0 {
-            self.next_page(1);
+        self.update_layout_position();
+        let sw = self.scrolled.allocation().width() as f64;
+        let sh = self.scrolled.allocation().height() as f64;
+        let pct = self.state.prefs.smart_scroll_percentage;
+        let step = [(sw * pct).max(1.0), (sh * pct).max(1.0)];
+        let axis_map = if self.state.prefs.invert_smart_scroll {
+            Some([1usize, 0])
         } else {
-            adj.set_value(adj.value() + step);
+            None
+        };
+        let moved = self
+            .state
+            .layout
+            .as_mut()
+            .and_then(|l| l.scroll_smartly(step, false, axis_map))
+            .is_some();
+        if moved {
+            self.update_viewport_position();
+        } else {
+            self.flip_next_protected();
         }
     }
 
+    /// Smart scroll backward (mirror of `smart_scroll_down`).
     pub fn smart_scroll_up(&mut self) {
-        let adj = self.scrolled.vadjustment();
-        let step = (self.scrolled.allocation().height() as f64
-            * self.state.prefs.smart_scroll_percentage)
-            .max(1.0);
-        if adj.value() - step <= 1.0 {
-            self.next_page(-1);
+        self.update_layout_position();
+        let sw = self.scrolled.allocation().width() as f64;
+        let sh = self.scrolled.allocation().height() as f64;
+        let pct = self.state.prefs.smart_scroll_percentage;
+        let step = [(sw * pct).max(1.0), (sh * pct).max(1.0)];
+        let axis_map = if self.state.prefs.invert_smart_scroll {
+            Some([1usize, 0])
         } else {
-            adj.set_value(adj.value() - step);
+            None
+        };
+        let moved = self
+            .state
+            .layout
+            .as_mut()
+            .and_then(|l| l.scroll_smartly(step, true, axis_map))
+            .is_some();
+        if moved {
+            self.update_viewport_position();
+        } else {
+            self.flip_prev_protected();
         }
     }
 
     fn scroll_to_start(&mut self) {
         self.scrolled.hadjustment().set_value(0.0);
         self.scrolled.vadjustment().set_value(0.0);
+    }
+
+    /// Sync the layout's viewport position from the scrollbars.
+    fn update_layout_position(&mut self) {
+        if let Some(l) = self.state.layout.as_mut() {
+            let pos = [
+                self.scrolled.hadjustment().value() as i64,
+                self.scrolled.vadjustment().value() as i64,
+            ];
+            l.set_viewport_position(pos);
+        }
+    }
+
+    /// Sync the scrollbars from the layout's viewport position.
+    fn update_viewport_position(&mut self) {
+        if let Some(l) = self.state.layout.as_ref() {
+            self.scrolled.hadjustment().set_value(l.viewport_box.pos[0] as f64);
+            self.scrolled.vadjustment().set_value(l.viewport_box.pos[1] as f64);
+        }
+    }
+
+    /// Scroll to a predefined destination (start/end) via the layout engine.
+    fn goto_predefined(&mut self, dest: [i64; 2], index: Option<usize>) {
+        if let Some(l) = self.state.layout.as_mut() {
+            l.scroll_to_predefined(dest, index);
+            self.update_viewport_position();
+        } else {
+            // Fallback (no layout built yet).
+            if dest[0] == crate::layout::SCROLL_TO_END {
+                self.scrolled.hadjustment().set_value(
+                    (self.state.last_content.0 as f64 - self.scrolled.hadjustment().page_size()).max(0.0),
+                );
+            } else {
+                self.scrolled.hadjustment().set_value(0.0);
+            }
+            if dest[1] == crate::layout::SCROLL_TO_END {
+                self.scrolled.vadjustment().set_value(
+                    (self.state.last_content.1 as f64 - self.scrolled.vadjustment().page_size()).max(0.0),
+                );
+            } else {
+                self.scrolled.vadjustment().set_value(0.0);
+            }
+        }
+    }
+
+    /// Advance to the next page with the N-press edge protection.
+    fn flip_next_protected(&mut self) {
+        if !self.state.prefs.flip_with_wheel {
+            self.state.scroll_edge_presses = 0;
+            return;
+        }
+        let n = self.state.prefs.number_of_key_presses_before_page_turn.max(1) as i32;
+        if self.state.scroll_edge_presses >= n - 1 {
+            self.state.scroll_edge_presses = 0;
+            self.next_page(1);
+        } else {
+            self.state.scroll_edge_presses = (self.state.scroll_edge_presses + 1).max(1);
+        }
+    }
+
+    /// Go back to the previous page with the N-press edge protection.
+    fn flip_prev_protected(&mut self) {
+        if !self.state.prefs.flip_with_wheel {
+            self.state.scroll_edge_presses = 0;
+            return;
+        }
+        let n = self.state.prefs.number_of_key_presses_before_page_turn.max(1) as i32;
+        if self.state.scroll_edge_presses <= -(n - 1) {
+            self.state.scroll_edge_presses = 0;
+            self.next_page(-1);
+        } else {
+            self.state.scroll_edge_presses = (self.state.scroll_edge_presses - 1).min(-1);
+        }
     }
 
     // ================= page select dialog =================
@@ -2350,8 +2465,8 @@ impl Ui {
         let spin = gtk::SpinButton::with_range(1.0, n as f64, 1.0);
         spin.set_value((self.state.page + 1) as f64);
 
-        let ok = gtk::Button::with_label("Go");
-        let cancel = gtk::Button::with_label("Cancel");
+        let ok = gtk::Button::with_label(&crate::i18n::tr("Go"));
+        let cancel = gtk::Button::with_label(&crate::i18n::tr("Cancel"));
 
         let vbox = gtk::Box::new(gtk::Orientation::Vertical, 8);
         vbox.set_margin_top(12);
@@ -2605,12 +2720,12 @@ impl Ui {
         contrast.set_value_pos(gtk::PositionType::Top);
         contrast.set_hexpand(true);
 
-        let auto_c = gtk::CheckButton::with_label("Auto contrast");
+        let auto_c = gtk::CheckButton::with_label(&crate::i18n::tr("Auto contrast"));
         auto_c.set_active(self.state.prefs.auto_contrast);
 
-        let apply = gtk::Button::with_label("Apply");
+        let apply = gtk::Button::with_label(&crate::i18n::tr("Apply"));
         apply.add_css_class("suggested-action");
-        let close = gtk::Button::with_label("Close");
+        let close = gtk::Button::with_label(&crate::i18n::tr("Close"));
 
         let grid = gtk::Grid::new();
         grid.set_row_spacing(10);
@@ -2619,11 +2734,11 @@ impl Ui {
         grid.set_margin_bottom(14);
         grid.set_margin_start(16);
         grid.set_margin_end(16);
-        let bl = gtk::Label::new(Some("Brightness:"));
+        let bl = gtk::Label::new(Some(&crate::i18n::tr("Brightness:")));
         bl.set_xalign(0.0);
         grid.attach(&bl, 0, 0, 1, 1);
         grid.attach(&bright, 1, 0, 1, 1);
-        let cl = gtk::Label::new(Some("Contrast:"));
+        let cl = gtk::Label::new(Some(&crate::i18n::tr("Contrast:")));
         cl.set_xalign(0.0);
         grid.attach(&cl, 0, 1, 1, 1);
         grid.attach(&contrast, 1, 1, 1, 1);
@@ -2831,7 +2946,7 @@ impl Ui {
             return;
         };
         let dlg = gtk::Window::new();
-        dlg.set_title(Some("Open with…"));
+        dlg.set_title(Some(&crate::i18n::tr("Open with…")));
         dlg.set_transient_for(Some(&self.window));
         dlg.set_modal(true);
         dlg.set_default_size(420, 320);
@@ -2848,7 +2963,7 @@ impl Ui {
             l.set_hexpand(true);
             l.set_xalign(0.0);
             row.append(&l);
-            let run = gtk::Button::with_label("Run");
+            let run = gtk::Button::with_label(&crate::i18n::tr("Run"));
             row.append(&run);
             list.append(&row);
             let command = command.clone();
@@ -2869,9 +2984,9 @@ impl Ui {
 
         let entry = gtk::Entry::new();
         entry.set_placeholder_text(Some("Command (use %f for the file)"));
-        let remember = gtk::CheckButton::with_label("Remember this command");
-        let run_now = gtk::Button::with_label("Run");
-        let close = gtk::Button::with_label("Close");
+        let remember = gtk::CheckButton::with_label(&crate::i18n::tr("Remember this command"));
+        let run_now = gtk::Button::with_label(&crate::i18n::tr("Run"));
+        let close = gtk::Button::with_label(&crate::i18n::tr("Close"));
 
         let form = gtk::Box::new(gtk::Orientation::Vertical, 6);
         form.set_margin_top(8);
