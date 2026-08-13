@@ -128,5 +128,3 @@ Windows notes:
 3. **Full smart-scroll layout engine** (port `layout.py`/`scrolling.py` box model).
 4. **i18n coverage** — wrap the remaining UI strings in `tr()` (status bar,
    OSD, dialogs) so all languages see translations.
-6. **PDF polish**: port the optimal-DPI trace pass from `pdf_external.py`.
-7. **Full smart-scroll layout engine** (port `layout.py`/`scrolling.py` box model).
