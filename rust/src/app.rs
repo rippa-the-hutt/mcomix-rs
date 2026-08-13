@@ -586,7 +586,7 @@ impl Ui {
             bookmarks_popover,
             more_btn,
             more_popover,
-            collapsible: Vec::new(),
+            collapsible,
             hidden_count: 0,
             toolbar_natural: None,
             more_natural: 0,
