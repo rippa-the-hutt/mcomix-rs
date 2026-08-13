@@ -37,12 +37,15 @@ echo "==> Adding Rust target $TARGET"
 rustup target add "$TARGET"
 
 # Packages needed to link + bundle GTK4 and friends (MSYS2 mingw-w64).
+# This is the library closure (pkg-config Requires chain + runtime libs);
+# build-only tools (python, tcl, gcc, ...) are intentionally excluded.
 PACKAGES="
-gtk4 gdk-pixbuf2 glib2 pango cairo harfbuzz freetype fontconfig fribidi
-libpng libjpeg-turbo libtiff libwebp zlib zstd xz bzip2 expat brotli
-libunistring graphite2 libffi pcre2 gettext libiconv libxml2 libdatrie
-libthai libepoxy graphene adwaita-icon-theme gcc-libs winpthreads
-vulkan-loader
+gtk4 gdk-pixbuf2 glib2 gettext-runtime libiconv pango cairo harfbuzz
+freetype fontconfig fribidi libpng libjpeg-turbo libtiff jbigkit lerc
+libdeflate libwebp giflib zlib zstd xz bzip2 expat brotli libunistring
+graphite2 libffi pcre2 libxml2 libdatrie libthai libepoxy graphene
+json-glib pixman lzo2 librsvg gcc-libs winpthreads vulkan-loader
+adwaita-icon-theme iso-codes shared-mime-info
 "
 
 mkdir -p "$WORK"
@@ -71,6 +74,20 @@ export PKG_CONFIG_LIBDIR="$MINGW/lib/pkgconfig"
 export PKG_CONFIG_SYSROOT_DIR="$SYSROOT"
 export PKG_CONFIG_PATH="$MINGW/lib/pkgconfig"
 export CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER="x86_64-w64-mingw32-gcc"
+
+echo "==> Verifying pkg-config closure"
+missing=""
+for mod in gtk4 gdk-pixbuf-2.0 glib-2.0 gio-2.0 pango pangocairo cairo \
+           cairo-gobject harfbuzz freetype2 fontconfig graphene-gobject-1.0 vulkan; do
+    if ! pkg-config --exists "$mod"; then
+        missing="$missing $mod"
+    fi
+done
+if [ -n "$missing" ]; then
+    echo "ERROR: missing pkg-config modules:$missing"
+    echo "Add the corresponding mingw-w64 packages to PACKAGES and retry."
+    exit 1
+fi
 
 echo "==> Cross-compiling (release)"
 cargo build --release --target "$TARGET"
