@@ -77,7 +77,13 @@ used as a link sysroot, and `makensis` (which runs natively on Linux):
 
 ```bash
 cd rust
+
+# Debian/Ubuntu
 sudo apt install mingw-w64 nsis zip zstd curl pkg-config
+
+# Arch Linux
+sudo pacman -S --needed mingw-w64-gcc nsis zip zstd curl pkgconf
+
 bash packaging/windows/cross-build-linux.sh
 # -> dist/mcomix-rs-<ver>-windows-x86_64.zip and dist/mcomix-rs-setup-<ver>.exe
 ```
