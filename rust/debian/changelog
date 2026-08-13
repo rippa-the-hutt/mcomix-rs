@@ -3,4 +3,4 @@ mcomix-rs (0.1.0-1) unstable; urgency=low
   * Milestone 1 of the Rust port: CBZ/CB7/CBT/CBR viewers, GTK4 UI,
     thumbnails, slideshow, preferences.
 
- -- MComix3 developers <iacoporippagmail@duck.com>  Wed, 12 Aug 2026 00:00:00 +0200
+ -- Rippa The Hutt <iacoporippagmail@duck.com>  Wed, 12 Aug 2026 00:00:00 +0200

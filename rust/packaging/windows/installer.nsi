@@ -5,7 +5,7 @@
   !define VERSION "0.1.0"
 !endif
 
-!define APPNAME "MComix3"
+!define APPNAME "MComix-rs"
 !define BIN "mcomix-rs.exe"
 !define SOURCE_DIR "dist\mcomix-rs-win64"
 !define REGKEY "Software\${APPNAME}"
@@ -41,7 +41,7 @@ Section "Install"
     WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" \
         "DisplayVersion" "${VERSION}"
     WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" \
-        "Publisher" "MComix3 developers"
+        "Publisher" "Rippa The Hutt"
 SectionEnd
 
 Section "Uninstall"

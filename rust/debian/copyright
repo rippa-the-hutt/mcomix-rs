@@ -1,7 +1,7 @@
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: mcomix-rs
-Upstream-Contact: MComix3 developers
-Source: https://github.com/rippa-the-hutt/mcomix3
+Upstream-Contact: Rippa The Hutt
+Source: https://github.com/rippa-the-hutt/mcomix-rs
 
 Files: *
 Copyright: 2005-2026 the MComix/Comix developers

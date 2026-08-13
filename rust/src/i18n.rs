@@ -1,4 +1,4 @@
-//! Internationalization: loads the MComix3 `.mo` message catalogs (embedded
+//! Internationalization: loads the MComix `.mo` message catalogs (embedded
 //! at build time) and resolves the user's language, mirroring
 //! `mcomix/i18n.py` + `mcomix/messages`. No libintl dependency.
 

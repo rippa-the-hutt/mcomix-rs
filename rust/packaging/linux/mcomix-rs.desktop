@@ -1,6 +1,6 @@
 [Desktop Entry]
 Version=1.0
-Name=MComix3
+Name=MComix-rs
 GenericName=Comic Book Viewer
 Comment=A viewer for comic book archives
 Exec=mcomix-rs %f

@@ -1,8 +1,9 @@
-//! MComix3 — Rust port. Entry point / CLI parsing.
+//! MComix-rs — a Rust/GTK4 comic book reader (port of MComix3). Entry point.
 //!
 //! CLI mirrors `mcomix/run.py`:
 //!   mcomix-rs [OPTIONS] [PATH]
 
+mod about_dialog;
 mod app;
 mod archive;
 mod bookmarks;
@@ -106,7 +107,7 @@ fn main() {
         .filter_level(level)
         .format_timestamp(None)
         .init();
-    log::info!("MComix3 (Rust port) {} starting", env!("CARGO_PKG_VERSION"));
+    log::info!("MComix-rs {} starting", env!("CARGO_PKG_VERSION"));
 
     // Register with GIO as an application that can open files, so passing a
     // comic path on the command line (or from a file manager) works.

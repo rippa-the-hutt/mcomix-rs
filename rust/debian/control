@@ -1,7 +1,7 @@
 Source: mcomix-rs
 Section: graphics
 Priority: optional
-Maintainer: MComix3 developers <iacoporippagmail@duck.com>
+Maintainer: Rippa The Hutt <iacoporippagmail@duck.com>
 Build-Depends: debhelper-compat (= 13),
                pkg-config,
                libgtk-4-dev,
@@ -14,7 +14,7 @@ Build-Depends: debhelper-compat (= 13),
                desktop-file-utils,
                shared-mime-info
 Standards-Version: 4.6.2
-Homepage: https://github.com/rippa-the-hutt/mcomix3
+Homepage: https://github.com/rippa-the-hutt/mcomix-rs
 Rules-Requires-Root: no
 
 Package: mcomix-rs
@@ -37,4 +37,4 @@ Description: GTK4 comic book viewer (Rust port)
  comics and manga) and supports a variety of container formats
  including CBR, CBZ, CB7, CBT, LHA and PDF.
  .
- This is the Rust port of MComix3, built with GTK4.
+ MComix-rs is the Rust/GTK4 port of the MComix3 comic book reader.

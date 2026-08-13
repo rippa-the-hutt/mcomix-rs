@@ -1,4 +1,4 @@
-# Maintainer: MComix3 developers <iacoporippagmail@duck.com>
+# Maintainer: Rippa The Hutt <iacoporippagmail@duck.com>
 # Builds the Rust port (mcomix-rs). Drop this file into a directory with the
 # mcomix-rs source tarball extracted as `mcomix-rs/` (or use `-f` with a git
 # checkout) and run `makepkg -si`.
@@ -8,7 +8,7 @@ pkgver=0.1.0
 pkgrel=1
 pkgdesc="A user-friendly, customizable comic book image viewer (Rust/GTK4 port)"
 arch=('x86_64' 'aarch64')
-url="https://github.com/rippa-the-hutt/mcomix3"
+url="https://github.com/rippa-the-hutt/mcomix-rs"
 license=('GPL2')
 depends=(
     'gtk4'

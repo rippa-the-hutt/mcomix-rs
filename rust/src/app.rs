@@ -255,6 +255,7 @@ pub struct Ui {
     pub btn_lens: gtk::ToggleButton,
     pub lens_pic: gtk::Picture,
     pub btn_openwith: gtk::Button,
+    pub btn_about: gtk::Button,
     pub btn_bookmarks: gtk::MenuButton,
     pub bookmarks_popover: gtk::Popover,
     /// On-screen display (page info, auto-hides).
@@ -283,7 +284,7 @@ impl Ui {
         let state = AppState::default();
 
         let window = gtk::ApplicationWindow::new(app);
-        window.set_title(Some("MComix3"));
+        window.set_title(Some("MComix-rs"));
         window.set_default_size(state.prefs.window_width, state.prefs.window_height);
 
         // ---- toolbar ----
@@ -379,6 +380,11 @@ impl Ui {
         btn_bookmarks.set_icon_name("bookmark-new");
         btn_bookmarks.set_tooltip_text(Some(&crate::i18n::tr("Bookmarks")));
         toolbar.append(&btn_bookmarks);
+
+        let btn_about = gtk::Button::from_icon_name("help-about");
+        btn_about.set_tooltip_text(Some("About"));
+        toolbar.append(&btn_about);
+
         let bookmarks_popover = gtk::Popover::new();
         btn_bookmarks.set_popover(Some(&bookmarks_popover));
 
@@ -524,6 +530,7 @@ impl Ui {
             btn_lens,
             lens_pic,
             btn_openwith,
+            btn_about,
             btn_bookmarks,
             bookmarks_popover,
             osd,
@@ -824,6 +831,14 @@ impl Ui {
             move |_| {
                 let ui = r.borrow();
                 ui.enhance_dialog(r.clone());
+            }
+        });
+        self.btn_about.connect_clicked({
+            let r = rc.clone();
+            move |_| {
+                let ui = r.borrow();
+                let win = ui.window.clone();
+                crate::about_dialog::show_about(&win);
             }
         });
         self.btn_openwith.connect_clicked({
@@ -1166,7 +1181,7 @@ impl Ui {
     /// fail to render on some setups).
     fn prompt_resume(&self, path: PathBuf, saved: u32, rc: Rc<RefCell<Ui>>) {
         let dlg = gtk::Window::new();
-        dlg.set_title(Some("MComix3"));
+        dlg.set_title(Some("MComix-rs"));
         dlg.set_transient_for(Some(&self.window));
         dlg.set_modal(true);
         dlg.set_resizable(false);
@@ -1294,7 +1309,7 @@ impl Ui {
                         self.state.displayed = vec![(0, 0, 0, 0), (0, 0, 0, 0)];
                         self.state.lens_last_crop = None;
                         self.lens_pic.set_visible(false);
-                        self.window.set_title(Some(&format!("{name} — MComix3")));
+                        self.window.set_title(Some(&format!("{name} — MComix-rs")));
                         self.show_osd(&format!(
                             "{name} — {} pages",
                             self.state.pages.len()
