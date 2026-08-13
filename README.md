@@ -1,102 +1,105 @@
-# MComix3
+# MComix-rs
 
-A user-friendly, customizable comic book image viewer, forked from [MComix](https://sourceforge.net/p/mcomix/).
+A user-friendly, customizable comic book image viewer for Linux and Windows,
+written in **Rust** with **GTK4** (`gtk4-rs`). It is a from-scratch port of
+[MComix3](https://github.com/rippa-the-hutt/mcomix3) (Python/PyGObject),
+designed to keep the same look, feel and features while being far easier to
+build and distribute.
 
-MComix3 is specifically designed to handle comic books (both Western comics and manga) and supports a variety of container formats including **CBR**, **CBZ**, **CB7**, **CBT**, **LHA** and **PDF**.
-
-It is written in **Python 3** and uses **GTK+ 3** through the **PyGObject** bindings.
+MComix-rs is specifically designed for comic books (both Western comics and
+manga) and supports **CBZ**, **CBR**, **CB7**, **CBT**, **LHA**, **PDF** and
+plain image directories — including archives embedded inside archives.
 
 ---
 
+## Features
+
+- GTK4 interface with a scrollable viewer, toolbar, thumbnail sidebar and status bar
+- Fit modes (best / width / height / size / manual), zoom in/out, rotation, flips
+- Double-page and manga (right-to-left) modes
+- Smart scrolling with MComix-style edge-flip protection
+- Lazy thumbnail generation (gdk-pixbuf scaled decode + on-disk cache)
+- Background page decoding with a page cache and prefetch — the UI never freezes
+- Magnifying lens, image enhancement (brightness/contrast/auto-contrast)
+- Slideshow, fullscreen, on-screen page indicator (OSD)
+- Bookmarks, library (SQLite) with cover grid and watch folders
+- "Continue reading?" resume prompt, last-read-page tracking
+- Configurable keybindings and preferences (JSON)
+- i18n: 23 languages embedded (same catalogs as MComix3)
+- Click-to-advance and drag-to-pan, like the original
+
 ## Installation
 
-### From the Arch User Repository (AUR)
+### Linux
 
-Arch Linux users can install MComix3 directly from the [AUR](https://aur.archlinux.org/packages/mcomix3):
-
-```bash
-# Using yay
-yay -S mcomix3
-
-# Using paru
-paru -S mcomix3
-
-# Manual build (requires base-devel)
-git clone https://aur.archlinux.org/mcomix3.git
-cd mcomix3
-makepkg -si
-```
-### Debian/Ubuntu
-
-Debian/Ubuntu users can install the software with the .deb package provided in [Releases](https://github.com/rippa-the-hutt/mcomix3/releases).
-
-### From Git
-
-```bash
-git clone https://github.com/rippa-the-hutt/mcomix3.git
-cd mcomix3
-python3 mcomixstarter.py
-```
-
-Simply run `mcomixstarter.py`:
-
-```bash
-python3 mcomixstarter.py
-```
-
-No installation required. You can also create a symlink to `mcomixstarter.py` from anywhere in your `PATH`.
-
-## Dependencies
-
-MComix3 requires **Python 3.7+**, **PyGObject** (GTK+ 3 bindings), and **Pillow** (Python Imaging Library Fork).
-
-- On **Debian/Ubuntu**: `apt install python3 python3-gi python3-gi-cairo gir1.2-gtk-3.0 python3-pil python3-pil.imagetk`
-- On **Fedora**: `dnf install python3 python3-gobject gtk3 python3-pillow`
-- On **Arch**: `pacman -S python python-gobject gtk3 python-pillow`
-
-### Archive backends
-
-| Format | Required tool |
+| Package | Where |
 |---|---|
-| **CBZ / ZIP** | Built-in Python `zipfile` support |
-| **CBR / RAR** | `unrar` or `rar` (or `libunrar`) |
-| **CB7 / 7Zip** | `7z` (p7zip) |
-| **CBT / TAR** | Built-in Python `tarfile` support |
-| **LHA / LZA** | `lha` or `7z` |
-| **PDF** | `mutool` and `mudraw` (MuPDF) |
+| **AppImage** (standalone) | GitHub Releases — download, `chmod +x`, run |
+| **.deb** (Debian/Ubuntu ≥ 24.04) | GitHub Releases, or build with `cargo deb` |
+| **Arch Linux** | `rust/packaging/arch/PKGBUILD` via `makepkg -si` |
+| **Tarball** (binary only) | GitHub Releases — needs the GTK4 runtime |
 
-## Changes from MComix
+### Windows
 
-MComix3 is a **Python 3 / GTK3 port** of the original MComix codebase with numerous bug fixes:
+- **Portable zip** — no-install folder with the `.exe` and all bundled DLLs/data.
+- **Installer** — NSIS `mcomix-rs-setup-<ver>.exe`.
 
-- Python 2 → Python 3 migration (`map`, `filter`, `cmp`, `str`/`bytes` fixes)
-- PyGTK (GTK2) → PyGObject (GTK3) migration (API compatibility fixes)
-- Fixed archive format detection (magic byte comparisons)
-- Fixed smooth scroll support for modern mice
-- Fixed drag-scroll hangs
-- Fixed various crashes on exit and dialog initialization
-- Fixed keyboard navigation with arrow keys
-- Fixed thumbnail generation in file browser and library
-- Library dialog is functional
+Both are produced from the GitHub Releases workflow (MSYS2/MINGW64 build).
+
+## Building from source
+
+```bash
+# Debian/Ubuntu dependencies
+sudo apt install pkg-config libgtk-4-dev libgdk-pixbuf-2.0-dev libpango1.0-dev \
+     libcairo2-dev libglib2.0-dev liblzma-dev libbz2-dev
+
+cd rust
+cargo build --release
+./target/release/mcomix-rs "/path/to/comic.cbz"
+```
+
+Optional external tools for archive backends: `unrar` or `7z` (RAR/LHA), and
+`mutool` (PDF). Everything else (ZIP, 7z, TAR, gzip/bzip2/xz) is handled by
+bundled pure-Rust libraries.
+
+## Usage
+
+```text
+mcomix-rs [OPTIONS] [PATH]
+  -s, --slideshow       start in slideshow mode
+  -f, --fullscreen      start fullscreen
+  -m, --manga           manga (right-to-left) mode
+  -d, --double-page     double page mode
+  -b / -w / -h          zoom best / width / height
+  -p, --page N          open at page N
+  -W, --loglevel LEVEL  all | debug | info | warn | error
+```
+
+Key bindings (configurable in Preferences → Shortcuts): `Page_Down`/`space`
+next, `Page_Up`/`BackSpace` previous, `Home`/`End` first/last, `g` go-to,
+`d` double page, `m` manga, `b/w/h/s/a` fit modes, `+`/`-` zoom, `r` rotate,
+`f`/`F11` fullscreen, `l` magnifying lens, `i` hide all, `Tab` info,
+`F9` thumbnails, `Ctrl+S` slideshow, `Ctrl+D` bookmark, `Ctrl+B` edit
+bookmarks, arrows scroll (edge-flip with repeated presses).
+
+## Data & configuration
+
+- Preferences: `~/.config/mcomix-rs/preferences.conf` (JSON)
+- Keybindings: `~/.config/mcomix-rs/keybindings.conf`
+- Library: `~/.local/share/mcomix-rs/library.db`, thumbnails in `~/.cache/mcomix-rs/`
+- Windows: `%APPDATA%\mcomix-rs\`
+
+## Documentation
+
+See [PORTING.md](PORTING.md) for the module-by-module status of the Python →
+Rust port and the roadmap.
 
 ## Credits
 
-**Python 3 port:** Rippa The Hutt
+- **Rippa The Hutt** — developer of MComix-rs
+- **Pontus Ekberg** — original vision/developer of Comix
+- **Louis Casillas, Moritz Brunner, Ark, Benoit Pierre** — MComix developers
+- **Victor Castillejo** — icon design
+- All the MComix translators (see the About dialog)
 
-MComix3 is a fork of [MComix](https://sourceforge.net/p/mcomix/), which itself was a fork of [Comix](https://comix.sourceforge.net/).
-
-**MComix3 developer:**
-- Rippa The Hutt
-
-**Original MComix developers:**
-- Louis Casillas
-- Moritz Brunner
-- Ark
-- Benoit Pierre
-
-**Original Comix developer:**
-- Pontus Ekberg
-
-Thanks to everyone who contributed translations, suggestions, bug reports, fixes and donations!
-
-Icons with a filename starting with "gimp" are taken from The GIMP, and icons with a filename starting with "tango" are taken from the Tango Desktop Project. Most other icons are made by Victor Castillejo, creator of the GNOME-Colors icon theme.
+MComix-rs is licensed under the GNU General Public License, version 2 or later.
