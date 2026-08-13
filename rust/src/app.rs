@@ -1222,13 +1222,31 @@ impl Ui {
             .map(|(l, b, _)| (l.clone(), b.clone()))
             .collect();
         for (label, btn) in &items {
-            let row = gtk::Button::with_label(label);
-            row.set_halign(gtk::Align::Fill);
-            let b = btn.clone();
-            row.connect_clicked(move |_| {
-                b.emit_clicked();
-            });
-            boxv.append(&row);
+            // Toggle buttons (Lens, Manga, Double page, ...) become toggle
+            // rows that mirror the underlying active state, so the menu shows
+            // the same "pressed" colour as the toolbar button.
+            if let Ok(toggle) = btn.clone().downcast::<gtk::ToggleButton>() {
+                let row = gtk::ToggleButton::with_label(label);
+                row.set_halign(gtk::Align::Fill);
+                row.set_active(toggle.is_active());
+                let t_click = toggle.clone();
+                row.connect_clicked(move |_| {
+                    t_click.emit_clicked();
+                });
+                let row2 = row.clone();
+                toggle.connect_toggled(move |t| {
+                    row2.set_active(t.is_active());
+                });
+                boxv.append(&row);
+            } else {
+                let row = gtk::Button::with_label(label);
+                row.set_halign(gtk::Align::Fill);
+                let b = btn.clone();
+                row.connect_clicked(move |_| {
+                    b.emit_clicked();
+                });
+                boxv.append(&row);
+            }
         }
         self.more_popover.set_child(Some(&boxv));
         self.more_btn.set_popover(Some(&self.more_popover));
