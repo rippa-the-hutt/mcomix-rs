@@ -262,7 +262,10 @@ pub fn show_library(rc: Rc<RefCell<Ui>>) {
             s.last_activated = id;
             drop(s);
             let mut ui = rc.borrow_mut();
-            ui.open_path_with_page(std::path::PathBuf::from(&path), page);
+            // Route through the generic open so the resume prompt appears for
+            // previously-read books (as with the Open dialog / CLI).
+            ui.open_path(std::path::PathBuf::from(&path), rc.clone());
+            drop(ui);
             // Close the library once the comic is opened.
             win.close();
         }

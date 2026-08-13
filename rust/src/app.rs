@@ -1214,8 +1214,17 @@ impl Ui {
         });
         let rc3 = rc.clone();
         let dlg3 = dlg.clone();
+        let no_path = path.clone();
         no.connect_clicked(move |_| {
-            rc3.borrow_mut().state.suppress_position = false;
+            let mut ui = rc3.borrow_mut();
+            ui.state.suppress_position = false;
+            // The user chose to start fresh: clear the saved position so the
+            // prompt doesn't reappear until the book is read past page 1 again.
+            crate::lastread::LastReadDb::set(&no_path, 1);
+            ui.state.prefs.path_to_last_file = no_path.to_string_lossy().into_owned();
+            ui.state.prefs.page_of_last_file = 1;
+            ui.state.prefs.save();
+            drop(ui);
             dlg3.close();
         });
         let rc4 = rc.clone();
