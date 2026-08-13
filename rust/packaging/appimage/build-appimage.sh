@@ -32,6 +32,8 @@ mkdir -p "$APPDIR/usr/share/icons/hicolor/256x256/apps"
 
 cp target/release/mcomix-rs "$APPDIR/usr/bin/"
 cp "$ROOT/packaging/linux/mcomix-rs.desktop" "$APPDIR/usr/share/applications/"
+# appimagetool requires a .desktop file at the AppDir root.
+cp "$ROOT/packaging/linux/mcomix-rs.desktop" "$APPDIR/mcomix-rs.desktop"
 cp "$ROOT/packaging/linux/icons/256x256/apps/mcomix3.png" \
     "$APPDIR/usr/share/icons/hicolor/256x256/apps/mcomix3.png"
 
