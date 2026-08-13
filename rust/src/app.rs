@@ -1204,9 +1204,12 @@ impl Ui {
         let rc2 = rc.clone();
         let dlg2 = dlg.clone();
         yes.connect_clicked(move |_| {
-            let mut ui = rc2.borrow_mut();
-            ui.state.suppress_position = false;
-            ui.goto_index(saved.saturating_sub(1) as usize, ScrollDest::Start);
+            {
+                let mut ui = rc2.borrow_mut();
+                ui.state.suppress_position = false;
+                ui.goto_index(saved.saturating_sub(1) as usize, ScrollDest::Start);
+            }
+            // Close after releasing the borrow: close_request re-borrows.
             dlg2.close();
         });
         let rc3 = rc.clone();

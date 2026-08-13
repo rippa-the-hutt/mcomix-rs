@@ -117,14 +117,19 @@ pub fn tr(msgid: &str) -> String {
     }
 }
 
-/// Translate with printf-style (`%s`/`%d`) or `{}` placeholder substitution.
+/// Translate with printf-style (`%s`/`%d`/`%i`/`%u`) or `{}` placeholder
+/// substitution (arguments are already formatted strings).
 pub fn trf(msgid: &str, args: &[&str]) -> String {
     let mut s = tr(msgid);
     for a in args {
-        if let Some(p) = s.find("%s") {
-            s.replace_range(p..p + 2, a);
-        } else if let Some(p) = s.find("{}") {
-            s.replace_range(p..p + 2, a);
+        let pat = ["%s", "%d", "%i", "%u", "{}"]
+            .iter()
+            .find(|p| s.contains(**p))
+            .map(|p| *p);
+        if let Some(p) = pat {
+            if let Some(pos) = s.find(p) {
+                s.replace_range(pos..pos + p.len(), a);
+            }
         }
     }
     s
