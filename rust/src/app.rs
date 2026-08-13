@@ -155,6 +155,8 @@ pub struct AppState {
     pub prefetch_gen: u64,
     /// Configurable keyboard bindings.
     pub bindings: crate::keybindings::BindingMap,
+    /// Smart-scroll layout engine (rebuilt on every redraw).
+    pub layout: Option<crate::layout::FiniteLayout>,
     /// Magnifying lens enabled.
     pub lens_enabled: bool,
     /// Raw (transformed+enhanced) RGBA of the currently displayed pages
@@ -220,6 +222,7 @@ impl Default for AppState {
             prefetch_gen: 0,
             bindings: crate::keybindings::BindingMap::load(),
             bookmarks: crate::bookmarks::Bookmarks::load(),
+            layout: None,
             lens_enabled: false,
             lens_source: vec![None, None],
             displayed: vec![(0, 0, 0, 0), (0, 0, 0, 0)],
@@ -1620,6 +1623,25 @@ impl Ui {
             Vec::new()
         };
 
+        // Build the smart-scroll layout (union-wrapped): drives content
+        // sizing and the smart-scroll grid.
+        let content_sizes: Vec<[i64; 2]> = zoomed
+            .iter()
+            .map(|(w, h)| [*w as i64, *h as i64])
+            .collect();
+        let orientation = if self.state.manga { [-1i64, 1] } else { [1i64, 1] };
+        let layout = crate::layout::FiniteLayout::new(
+            &content_sizes,
+            [vw as i64, vh as i64],
+            orientation,
+            2,
+            false, // wrap_individually (Python's expand_area default)
+            0,     // distribution axis (width)
+            1,     // alignment axis (height)
+        );
+        let union = layout.union_box.size;
+        self.state.layout = Some(layout);
+
         let mut total_w = 0.0_f64;
         let mut total_h = 0.0_f64;
         let mut offset_x = 0.0_f64;
@@ -1652,9 +1674,10 @@ impl Ui {
         if double {
             total_w += 2.0; // spacing between pages
         }
-        let (tw, th) = (total_w.max(1.0) as i32, total_h.max(1.0) as i32);
+        let (tw, th) = (union[0].max(1) as i32, union[1].max(1) as i32);
         self.content.set_size_request(tw, th);
         self.state.last_content = (tw, th);
+        self.update_layout_position();
         self.content.set_direction(if self.state.manga {
             gtk::TextDirection::Rtl
         } else {
@@ -1896,20 +1919,13 @@ impl Ui {
 
     /// Position the viewport: top for forward navigation, bottom for backward.
     fn scroll_to_destination(&mut self, dest: ScrollDest) {
-        let hadj = self.scrolled.hadjustment();
-        let vadj = self.scrolled.vadjustment();
+        use crate::layout::{SCROLL_TO_END, SCROLL_TO_START};
         match dest {
             ScrollDest::Start => {
-                hadj.set_value(0.0);
-                vadj.set_value(0.0);
+                self.goto_predefined([SCROLL_TO_START, SCROLL_TO_START], Some(0));
             }
             ScrollDest::End => {
-                hadj.set_value(0.0);
-                // Use the content size we just laid out: the scrolled window's
-                // adjustment upper is not updated synchronously yet.
-                let max_v =
-                    (self.state.last_content.1 as f64 - vadj.page_size()).max(0.0);
-                vadj.set_value(max_v);
+                self.goto_predefined([SCROLL_TO_END, SCROLL_TO_END], Some(0));
             }
             ScrollDest::Keep => {}
         }
@@ -2304,34 +2320,134 @@ impl Ui {
         adj.set_value(adj.value() + self.state.prefs.number_of_pixels_to_scroll_per_key_event as f64);
     }
 
+    /// Smart scroll forward using the layout engine (Bresenham grid, manga
+    /// orientation, axis swapping). Flips the page (with protection) when the
+    /// content is exhausted.
     pub fn smart_scroll_down(&mut self) {
-        let adj = self.scrolled.vadjustment();
-        let upper = adj.upper() - adj.page_size();
-        let step = (self.scrolled.allocation().height() as f64
-            * self.state.prefs.smart_scroll_percentage)
-            .max(1.0);
-        if adj.value() + step >= upper - 1.0 {
-            self.next_page(1);
+        self.update_layout_position();
+        let sw = self.scrolled.allocation().width() as f64;
+        let sh = self.scrolled.allocation().height() as f64;
+        let pct = self.state.prefs.smart_scroll_percentage;
+        let step = [(sw * pct).max(1.0), (sh * pct).max(1.0)];
+        let axis_map = if self.state.prefs.invert_smart_scroll {
+            Some([1usize, 0])
         } else {
-            adj.set_value(adj.value() + step);
+            None
+        };
+        let moved = self
+            .state
+            .layout
+            .as_mut()
+            .and_then(|l| l.scroll_smartly(step, false, axis_map))
+            .is_some();
+        if moved {
+            self.update_viewport_position();
+        } else {
+            self.flip_next_protected();
         }
     }
 
+    /// Smart scroll backward (mirror of `smart_scroll_down`).
     pub fn smart_scroll_up(&mut self) {
-        let adj = self.scrolled.vadjustment();
-        let step = (self.scrolled.allocation().height() as f64
-            * self.state.prefs.smart_scroll_percentage)
-            .max(1.0);
-        if adj.value() - step <= 1.0 {
-            self.next_page(-1);
+        self.update_layout_position();
+        let sw = self.scrolled.allocation().width() as f64;
+        let sh = self.scrolled.allocation().height() as f64;
+        let pct = self.state.prefs.smart_scroll_percentage;
+        let step = [(sw * pct).max(1.0), (sh * pct).max(1.0)];
+        let axis_map = if self.state.prefs.invert_smart_scroll {
+            Some([1usize, 0])
         } else {
-            adj.set_value(adj.value() - step);
+            None
+        };
+        let moved = self
+            .state
+            .layout
+            .as_mut()
+            .and_then(|l| l.scroll_smartly(step, true, axis_map))
+            .is_some();
+        if moved {
+            self.update_viewport_position();
+        } else {
+            self.flip_prev_protected();
         }
     }
 
     fn scroll_to_start(&mut self) {
         self.scrolled.hadjustment().set_value(0.0);
         self.scrolled.vadjustment().set_value(0.0);
+    }
+
+    /// Sync the layout's viewport position from the scrollbars.
+    fn update_layout_position(&mut self) {
+        if let Some(l) = self.state.layout.as_mut() {
+            let pos = [
+                self.scrolled.hadjustment().value() as i64,
+                self.scrolled.vadjustment().value() as i64,
+            ];
+            l.set_viewport_position(pos);
+        }
+    }
+
+    /// Sync the scrollbars from the layout's viewport position.
+    fn update_viewport_position(&mut self) {
+        if let Some(l) = self.state.layout.as_ref() {
+            self.scrolled.hadjustment().set_value(l.viewport_box.pos[0] as f64);
+            self.scrolled.vadjustment().set_value(l.viewport_box.pos[1] as f64);
+        }
+    }
+
+    /// Scroll to a predefined destination (start/end) via the layout engine.
+    fn goto_predefined(&mut self, dest: [i64; 2], index: Option<usize>) {
+        if let Some(l) = self.state.layout.as_mut() {
+            l.scroll_to_predefined(dest, index);
+            self.update_viewport_position();
+        } else {
+            // Fallback (no layout built yet).
+            if dest[0] == crate::layout::SCROLL_TO_END {
+                self.scrolled.hadjustment().set_value(
+                    (self.state.last_content.0 as f64 - self.scrolled.hadjustment().page_size()).max(0.0),
+                );
+            } else {
+                self.scrolled.hadjustment().set_value(0.0);
+            }
+            if dest[1] == crate::layout::SCROLL_TO_END {
+                self.scrolled.vadjustment().set_value(
+                    (self.state.last_content.1 as f64 - self.scrolled.vadjustment().page_size()).max(0.0),
+                );
+            } else {
+                self.scrolled.vadjustment().set_value(0.0);
+            }
+        }
+    }
+
+    /// Advance to the next page with the N-press edge protection.
+    fn flip_next_protected(&mut self) {
+        if !self.state.prefs.flip_with_wheel {
+            self.state.scroll_edge_presses = 0;
+            return;
+        }
+        let n = self.state.prefs.number_of_key_presses_before_page_turn.max(1) as i32;
+        if self.state.scroll_edge_presses >= n - 1 {
+            self.state.scroll_edge_presses = 0;
+            self.next_page(1);
+        } else {
+            self.state.scroll_edge_presses = (self.state.scroll_edge_presses + 1).max(1);
+        }
+    }
+
+    /// Go back to the previous page with the N-press edge protection.
+    fn flip_prev_protected(&mut self) {
+        if !self.state.prefs.flip_with_wheel {
+            self.state.scroll_edge_presses = 0;
+            return;
+        }
+        let n = self.state.prefs.number_of_key_presses_before_page_turn.max(1) as i32;
+        if self.state.scroll_edge_presses <= -(n - 1) {
+            self.state.scroll_edge_presses = 0;
+            self.next_page(-1);
+        } else {
+            self.state.scroll_edge_presses = (self.state.scroll_edge_presses - 1).min(-1);
+        }
     }
 
     // ================= page select dialog =================

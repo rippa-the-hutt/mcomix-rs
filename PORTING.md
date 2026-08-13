@@ -49,7 +49,7 @@ rust/
 | `image_handler.py` (cache, prefetch) | `app.rs` + `lru.rs` | ✅ LRU page cache (`max pages to cache`) + background prefetch |
 | `image_tools.py` | `image_loader.rs` | ✅ core; enhancers ⏳ |
 | `zoom.py` | `zoom.rs` | ✅ core |
-| `layout.py` + `scrolling.py` (smart scroll) | `app.rs` (percentage smart scroll) | 🟡 basic smart scroll; full layout engine later |
+| `layout.py` + `scrolling.py` (smart scroll) | `layout.rs` + `app.rs` | ✅ box model (Box/scrolling/layout ported); smart scroll + predefined scroll |
 | `thumbbar.py`, `thumbnail_tools.py` | `app.rs` + `thumb_cache.rs` | ✅ lazy/windowed generation, gdk-pixbuf scaled decode, on-disk cache, page-decode priority |
 | `slideshow.py` | `app.rs` | ✅ basic |
 | `preferences.py` | `prefs.rs` | ✅ (JSON, same keys) |
@@ -124,8 +124,7 @@ Windows notes:
 
 ## What's next (suggested order)
 
-1. **Full smart-scroll layout engine** (port `layout.py`/`scrolling.py` box model).
-2. **i18n coverage** — wrap the remaining UI strings in `tr()` (status bar,
+1. **i18n coverage** — wrap the remaining UI strings in `tr()` (status bar,
    OSD, dialogs) so all languages see translations.
 4. **macOS packaging** — very last step (no Mac available to the
    maintainer). The codebase is portable (gtk4-rs works on macOS via
