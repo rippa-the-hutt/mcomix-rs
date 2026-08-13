@@ -142,6 +142,9 @@ pub struct AppState {
     /// Accumulated edge presses used by the scroll-with-flipping protection
     /// (mirrors Python's `_extra_scroll_events`).
     pub scroll_edge_presses: i32,
+    /// While the resume prompt is open, position recording is suppressed so
+    /// opening page 1 behind the dialog doesn't clobber the saved page.
+    pub suppress_position: bool,
     /// LRU cache of decoded page textures (mirrors `max pages to cache`).
     pub cache: crate::lru::LruCache<usize, (gdk::Texture, u32, u32)>,
     /// Pages to prefetch in the background, in priority order.
@@ -207,6 +210,7 @@ impl Default for AppState {
             page_dest: None,
             last_save: None,
             scroll_edge_presses: 0,
+            suppress_position: false,
             cache: crate::lru::LruCache::new(
                 cache_capacity,
                 384 * 1024 * 1024, // ~384 MB of decoded pages
@@ -1133,10 +1137,20 @@ impl Ui {
         // page 1, ask whether to resume (or resume silently if the prompt is
         // disabled). Explicit starts (CLI -p, bookmarks, sibling navigation)
         // bypass this and call open_path_with_page directly.
-        let saved = crate::lastread::LastReadDb::get(&path).filter(|p| *p > 1);
+        let raw_saved = crate::lastread::LastReadDb::get(&path);
+        log::debug!(
+            "open_path: {} saved={:?} ask={}",
+            path.display(),
+            raw_saved,
+            self.state.prefs.ask_resume_from_last_page
+        );
+        let saved = raw_saved.filter(|p| *p > 1);
         match (self.state.prefs.ask_resume_from_last_page, saved) {
             (true, Some(saved)) => {
                 // Show page 1 behind the prompt; jump if the user says Yes.
+                // Suppress position recording while the dialog is open so
+                // opening page 1 doesn't clobber the saved page.
+                self.state.suppress_position = true;
                 self.open_path_with_page(path.clone(), 1);
                 self.prompt_resume(path, saved, rc);
             }
@@ -1150,29 +1164,73 @@ impl Ui {
     }
 
     /// Ask the user whether to resume from the saved page or start at page 1.
+    /// Uses a classic modal GtkWindow (not AlertDialog, which can silently
+    /// fail to render on some setups).
     fn prompt_resume(&self, path: PathBuf, saved: u32, rc: Rc<RefCell<Ui>>) {
-        let dlg = gtk::AlertDialog::builder()
-            .message(crate::i18n::trf("Continue reading from page %d?", &[&saved.to_string()]))
-            .detail(format!(
-                "You previously stopped reading this book on page {saved}. If you choose \
-                 'Yes', reading will resume on page {saved}. Otherwise, the first page \
-                 will be loaded."
-            ))
-            .build();
-        dlg.set_buttons(&[&crate::i18n::tr("Yes"), &crate::i18n::tr("No")]);
+        let dlg = gtk::Window::new();
+        dlg.set_title(Some("MComix3"));
+        dlg.set_transient_for(Some(&self.window));
+        dlg.set_modal(true);
+        dlg.set_resizable(false);
+
+        let title = crate::i18n::trf("Continue reading from page %d?", &[&saved.to_string()]);
+        let msg = gtk::Label::new(Some(&title));
+        msg.set_css_classes(&["dialog-title"]);
+        let detail = gtk::Label::new(Some(&format!(
+            "You previously stopped reading this book on page {saved}. If you choose \
+             'Yes', reading will resume on page {saved}. Otherwise, the first page \
+             will be loaded."
+        )));
+        detail.set_wrap(true);
+        detail.set_max_width_chars(52);
+        detail.set_xalign(0.0);
+
+        let yes = gtk::Button::with_label(&crate::i18n::tr("Yes"));
+        yes.add_css_class("suggested-action");
+        let no = gtk::Button::with_label(&crate::i18n::tr("No"));
+
+        let vbox = gtk::Box::new(gtk::Orientation::Vertical, 10);
+        vbox.set_margin_top(16);
+        vbox.set_margin_bottom(16);
+        vbox.set_margin_start(16);
+        vbox.set_margin_end(16);
+        vbox.append(&msg);
+        vbox.append(&detail);
+        let h = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        h.set_halign(gtk::Align::End);
+        h.append(&no);
+        h.append(&yes);
+        vbox.append(&h);
+        dlg.set_child(Some(&vbox));
+
         let rc2 = rc.clone();
-        let win = self.window.clone();
+        let dlg2 = dlg.clone();
+        yes.connect_clicked(move |_| {
+            let mut ui = rc2.borrow_mut();
+            ui.state.suppress_position = false;
+            ui.goto_index(saved.saturating_sub(1) as usize, ScrollDest::Start);
+            dlg2.close();
+        });
+        let rc3 = rc.clone();
+        let dlg3 = dlg.clone();
+        no.connect_clicked(move |_| {
+            rc3.borrow_mut().state.suppress_position = false;
+            dlg3.close();
+        });
+        let rc4 = rc.clone();
+        dlg.connect_close_request(move |_| {
+            rc4.borrow_mut().state.suppress_position = false;
+            glib::Propagation::Proceed
+        });
+
         // Defer until the main loop runs and the window is presented, so the
         // dialog reliably shows even when this is triggered during startup.
+        let dlg4 = dlg.clone();
         glib::idle_add_local_once(move || {
-            dlg.choose(Some(&win), None::<&gio::Cancellable>, move |res| {
-                let idx = res.unwrap_or(1);
-                if idx == 0 {
-                    let mut ui = rc2.borrow_mut();
-                    ui.goto_index(saved.saturating_sub(1) as usize, ScrollDest::Start);
-                }
-            });
+            log::debug!("prompt_resume: showing dialog for page {saved}");
+            dlg4.present();
         });
+        let _ = path;
     }
 
     pub fn open_path_with_page(&mut self, path: PathBuf, start_page: u32) {
@@ -3040,6 +3098,9 @@ impl Ui {
     /// Persist the current reading position, throttled to at most one write
     /// per second (rapid paging must not hammer the disk).
     fn record_position(&mut self) {
+        if self.state.suppress_position {
+            return;
+        }
         let Some(path) = self.state.path.clone() else {
             return;
         };
