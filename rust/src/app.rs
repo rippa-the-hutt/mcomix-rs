@@ -420,6 +420,16 @@ impl Ui {
         btn_prefs.set_tooltip_text(Some(&crate::i18n::tr("Preferences")));
         toolbar.append(&btn_prefs);
 
+        // Overflow ("more") menu for narrow windows (i3 etc.) — appended last
+        // so it always sits at the right end of the toolbar.
+        let more_btn = gtk::MenuButton::new();
+        more_btn.set_icon_name("open-menu-symbolic");
+        more_btn.set_tooltip_text(Some("More"));
+        more_btn.set_visible(false);
+        toolbar.append(&more_btn);
+        let more_popover = gtk::Popover::new();
+        more_btn.set_popover(Some(&more_popover));
+
         // All Button-type toolbar controls that may collapse into the
         // overflow menu, least-used first. Open/prev/next, the zoom dropdown,
         // the bookmarks menu button and the more button always stay visible.
@@ -1249,10 +1259,14 @@ impl Ui {
             natural
         });
         if self.hidden_count == 0 {
-            // Fully expanded: keep the reference fresh.
+            // Fully expanded: refresh the reference widths (widgets may not
+            // have been realized when the collapsible list was built).
             let (_, natural, _, _) = self.toolbar.measure(gtk::Orientation::Horizontal, -1);
             self.toolbar_natural = Some(natural);
             self.more_natural = self.more_btn.measure(gtk::Orientation::Horizontal, -1).1;
+            for (_, b, w) in self.collapsible.iter_mut() {
+                *w = b.measure(gtk::Orientation::Horizontal, -1).1;
+            }
             if alloc < natural - MARGIN {
                 self.set_toolbar_hidden(1);
             }
