@@ -58,6 +58,40 @@ cargo build --release
 ./target/release/mcomix-rs "/path/to/comic.cbz"
 ```
 
+### Building the Windows artifacts from Linux (cross-compile)
+
+No Windows machine or runner needed — the portable zip and NSIS installer are
+built with the MinGW-w64 cross compiler, MSYS2's `mingw-w64` GTK4 packages
+used as a link sysroot, and `makensis` (which runs natively on Linux):
+
+```bash
+cd rust
+sudo apt install mingw-w64 nsis zip zstd curl pkg-config
+bash packaging/windows/cross-build-linux.sh
+# -> dist/mcomix-rs-<ver>-windows-x86_64.zip and dist/mcomix-rs-setup-<ver>.exe
+```
+
+## Releases
+
+Releases are produced entirely by the GitHub Actions workflow in
+`.github/workflows/release.yml`:
+
+1. **Tag the release**: `git tag v0.1.0 && git push origin v0.1.0`
+2. The workflow builds and uploads:
+   - Linux: `.deb` (cargo-deb), standalone tarball, and a self-contained **AppImage**
+   - Windows: portable zip + NSIS installer, **cross-compiled on a Linux runner**
+3. A **draft** GitHub Release is created with all artifacts attached — review
+   and publish it manually from the Releases page.
+
+You can also run the individual packaging scripts locally:
+
+| Artifact | Command (from `rust/`) |
+|---|---|
+| `.deb` | `cargo install cargo-deb && cargo deb` |
+| AppImage | `bash packaging/appimage/build-appimage.sh` |
+| Windows zip + installer | `bash packaging/windows/cross-build-linux.sh` |
+| Arch Linux package | `makepkg -si` with `packaging/arch/PKGBUILD` |
+
 Optional external tools for archive backends: `unrar` or `7z` (RAR/LHA), and
 `mutool` (PDF). Everything else (ZIP, 7z, TAR, gzip/bzip2/xz) is handled by
 bundled pure-Rust libraries.
