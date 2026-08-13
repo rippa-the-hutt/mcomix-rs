@@ -8,6 +8,11 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+# The release job creates the GitHub Release and generates release notes,
+# which requires write access to contents.
+permissions:
+  contents: write
+
 jobs:
   linux:
     name: Linux (.deb + tarball)
