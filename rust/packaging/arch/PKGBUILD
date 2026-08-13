@@ -10,6 +10,9 @@ pkgdesc="A user-friendly, customizable comic book image viewer (Rust/GTK4 port)"
 arch=('x86_64')
 url="https://github.com/rippa-the-hutt/mcomix-rs"
 license=('GPL2')
+# mcomix-rs supersedes the Python mcomix3 package (same icons/desktop files).
+conflicts=('mcomix3')
+replaces=('mcomix3')
 depends=(
     'gtk4'
     'gdk-pixbuf2'
