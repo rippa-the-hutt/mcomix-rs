@@ -1639,7 +1639,6 @@ impl Ui {
             0,     // distribution axis (width)
             1,     // alignment axis (height)
         );
-        let union = layout.union_box.size;
         self.state.layout = Some(layout);
 
         let mut total_w = 0.0_f64;
@@ -1674,7 +1673,7 @@ impl Ui {
         if double {
             total_w += 2.0; // spacing between pages
         }
-        let (tw, th) = (union[0].max(1) as i32, union[1].max(1) as i32);
+        let (tw, th) = (total_w.max(1.0) as i32, total_h.max(1.0) as i32);
         self.content.set_size_request(tw, th);
         self.state.last_content = (tw, th);
         self.update_layout_position();
