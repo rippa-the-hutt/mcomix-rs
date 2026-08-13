@@ -75,9 +75,13 @@ impl Archive for LhaArchive {
         &self.name
     }
 
+    fn raw_names(&mut self) -> Result<Vec<String>, ArchiveError> {
+        self.list_raw()
+    }
+
     fn page_names(&mut self) -> Result<Vec<String>, ArchiveError> {
         if self.pages.is_none() {
-            self.pages = Some(sorted_pages(self.list_raw()?));
+            self.pages = Some(sorted_pages(self.raw_names()?));
         }
         Ok(self.pages.clone().unwrap_or_default())
     }

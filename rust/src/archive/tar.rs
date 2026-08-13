@@ -71,9 +71,15 @@ impl Archive for TarArchive {
         &self.name
     }
 
+    fn raw_names(&mut self) -> Result<Vec<String>, ArchiveError> {
+        let mut names = self.read_all_names()?;
+        names.retain(|n| !n.ends_with('/'));
+        Ok(names)
+    }
+
     fn page_names(&mut self) -> Result<Vec<String>, ArchiveError> {
         if self.pages.is_none() {
-            self.pages = Some(sorted_pages(self.read_all_names()?));
+            self.pages = Some(sorted_pages(self.raw_names()?));
         }
         Ok(self.pages.clone().unwrap_or_default())
     }

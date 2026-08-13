@@ -37,9 +37,18 @@ impl Archive for ZipArchive {
         &self.name
     }
 
+    fn raw_names(&mut self) -> Result<Vec<String>, ArchiveError> {
+        Ok(self
+            .archive
+            .file_names()
+            .map(|s| s.to_string())
+            .filter(|n| !n.ends_with('/'))
+            .collect())
+    }
+
     fn page_names(&mut self) -> Result<Vec<String>, ArchiveError> {
         if self.pages.is_none() {
-            let names: Vec<String> = self.archive.file_names().map(|s| s.to_string()).collect();
+            let names = self.raw_names()?;
             self.pages = Some(sorted_pages(names));
         }
         Ok(self.pages.clone().unwrap_or_default())

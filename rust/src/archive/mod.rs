@@ -5,6 +5,7 @@
 pub mod lha;
 pub mod pdf;
 pub mod rar;
+pub mod recursive;
 pub mod sevenzip;
 pub mod tar;
 pub mod zip;
@@ -94,6 +95,12 @@ pub trait Archive: Send {
     /// The archive file name (as opened).
     fn name(&self) -> &str;
 
+    /// All entries (unfiltered, unsorted) — used to discover embedded
+    /// archives. Defaults to the filtered page list.
+    fn raw_names(&mut self) -> Result<Vec<String>, ArchiveError> {
+        self.page_names()
+    }
+
     /// Sorted list of image entries inside the archive.
     fn page_names(&mut self) -> Result<Vec<String>, ArchiveError>;
 
@@ -153,11 +160,19 @@ pub fn detect(path: &Path) -> Option<ArchiveKind> {
     None
 }
 
-/// Open an archive and return a boxed reader.
+/// Open an archive and return a boxed reader that transparently handles
+/// archives embedded inside archives (mirrors `get_recursive_archive_handler`).
 pub fn open(path: &Path) -> Result<Box<dyn Archive>, ArchiveError> {
     if path.is_dir() {
         return Ok(Box::new(DirArchive::open(path)));
     }
+    let plain = open_plain(path)?;
+    Ok(Box::new(recursive::RecursiveArchive::new(plain)))
+}
+
+/// Open an archive without the recursive wrapper (used internally by the
+/// recursive handler for embedded archives).
+pub fn open_plain(path: &Path) -> Result<Box<dyn Archive>, ArchiveError> {
     let kind = detect(path).ok_or_else(|| ArchiveError::Unsupported(path.display().to_string()))?;
     open_with_kind(path, kind)
 }

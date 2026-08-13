@@ -64,19 +64,37 @@ impl Archive for SevenZipArchive {
         &self.name
     }
 
-    fn page_names(&mut self) -> Result<Vec<String>, ArchiveError> {
-        if self.pages.is_none() {
-            let names = if self.external {
+    fn raw_names(&mut self) -> Result<Vec<String>, ArchiveError> {
+        let names = if self.external {
                 let prog = find_sevenz().unwrap();
                 let p = self.path.to_string_lossy().into_owned();
                 let raw = run_capture(&prog, &["l", "-slt", &p])?;
                 let text = String::from_utf8_lossy(&raw);
                 let mut names = Vec::new();
+                // `7z l -slt` prints the archive's own path first, then a
+                // "----------" separator, then the entries; only parse entries
+                // after the separator (and skip directories).
+                let mut in_entries = false;
+                let mut is_folder = false;
                 for line in text.lines() {
+                    let line = line.trim();
+                    if line == "----------" {
+                        in_entries = true;
+                        continue;
+                    }
+                    if !in_entries {
+                        continue;
+                    }
                     if let Some(rest) = line.strip_prefix("Path = ") {
                         names.push(rest.to_string());
+                    } else if line.starts_with("Folder = ") && line.ends_with('+') {
+                        is_folder = true;
+                    } else if line.starts_with("Attributes = ") {
+                        // entries that are directories get no Path? (no-op)
                     }
                 }
+                names.retain(|n| !n.ends_with('/'));
+                let _ = is_folder;
                 names
             } else {
                 let mut reader = sevenz_rust::SevenZReader::<std::fs::File>::open(
@@ -93,7 +111,12 @@ impl Archive for SevenZipArchive {
                     .map_err(|e| ArchiveError::Other(format!("cannot list 7z entries: {e}")))?;
                 names
             };
-            self.pages = Some(sorted_pages(names));
+        Ok(names)
+    }
+
+    fn page_names(&mut self) -> Result<Vec<String>, ArchiveError> {
+        if self.pages.is_none() {
+            self.pages = Some(sorted_pages(self.raw_names()?));
         }
         Ok(self.pages.clone().unwrap_or_default())
     }

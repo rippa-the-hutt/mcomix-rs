@@ -48,18 +48,28 @@ impl RarArchive {
         };
         let text = String::from_utf8_lossy(&raw);
         let mut names = Vec::new();
-        for line in text.lines() {
-            let line = line.trim();
-            if line.is_empty() {
-                continue;
-            }
-            if self.backend == "7z" {
-                // `7z l -slt` output: "Path = x" lines.
-                if let Some(rest) = line.strip_prefix("Path = ") {
-                    names.push(rest.to_string());
+        if self.backend == "7z" {
+            // `7z l -slt`: skip the archive header (own path) and only parse
+            // "Path = x" lines after the "----------" separator.
+            let mut in_entries = false;
+            for line in text.lines() {
+                let line = line.trim();
+                if line == "----------" {
+                    in_entries = true;
+                    continue;
                 }
-            } else {
-                names.push(line.to_string());
+                if in_entries {
+                    if let Some(rest) = line.strip_prefix("Path = ") {
+                        names.push(rest.to_string());
+                    }
+                }
+            }
+        } else {
+            for line in text.lines() {
+                let line = line.trim();
+                if !line.is_empty() {
+                    names.push(line.to_string());
+                }
             }
         }
         Ok(names)
@@ -71,9 +81,13 @@ impl Archive for RarArchive {
         &self.name
     }
 
+    fn raw_names(&mut self) -> Result<Vec<String>, ArchiveError> {
+        self.list_raw()
+    }
+
     fn page_names(&mut self) -> Result<Vec<String>, ArchiveError> {
         if self.pages.is_none() {
-            let names = self.list_raw()?;
+            let names = self.raw_names()?;
             self.pages = Some(sorted_pages(names));
         }
         Ok(self.pages.clone().unwrap_or_default())
