@@ -316,7 +316,7 @@ impl Ui {
             "Best fit", "Fit width", "Fit height", "Fit size", "Manual",
         ]);
         zoom_dropdown.set_selected(state.zoom.fit_mode as u32);
-        zoom_dropdown.set_tooltip_text(Some("Zoom mode"));
+        zoom_dropdown.set_tooltip_text(Some(&crate::i18n::tr("Zoom mode")));
         toolbar.append(&zoom_dropdown);
 
         let btn_zoom_out = gtk::Button::from_icon_name("zoom-out");
@@ -332,19 +332,19 @@ impl Ui {
         toolbar.append(&btn_zoom_orig);
 
         let btn_rotate = gtk::Button::from_icon_name("object-rotate-right");
-        btn_rotate.set_tooltip_text(Some("Rotate 90° clockwise"));
+        btn_rotate.set_tooltip_text(Some(&crate::i18n::tr("Rotate 90° clockwise")));
         toolbar.append(&btn_rotate);
 
         let sep2 = gtk::Separator::new(gtk::Orientation::Vertical);
         toolbar.append(&sep2);
 
-        let btn_double = gtk::ToggleButton::with_label("Two pages");
-        btn_double.set_tooltip_text(Some("Double page mode"));
+        let btn_double = gtk::ToggleButton::with_label(&crate::i18n::tr("Two pages"));
+        btn_double.set_tooltip_text(Some(&crate::i18n::tr("Double page mode")));
         btn_double.set_active(state.double_page);
         toolbar.append(&btn_double);
 
-        let btn_manga = gtk::ToggleButton::with_label("Manga");
-        btn_manga.set_tooltip_text(Some("Manga (right-to-left) mode"));
+        let btn_manga = gtk::ToggleButton::with_label(&crate::i18n::tr("Manga"));
+        btn_manga.set_tooltip_text(Some(&crate::i18n::tr("Manga (right-to-left) mode")));
         btn_manga.set_active(state.manga);
         toolbar.append(&btn_manga);
 
@@ -360,23 +360,23 @@ impl Ui {
 
         let btn_thumbs = gtk::ToggleButton::new();
         btn_thumbs.set_icon_name("view-list-symbolic");
-        btn_thumbs.set_tooltip_text(Some("Thumbnails"));
+        btn_thumbs.set_tooltip_text(Some(&crate::i18n::tr("Thumbnails")));
         btn_thumbs.set_active(state.prefs.show_thumbnails);
         toolbar.append(&btn_thumbs);
 
         let sep3 = gtk::Separator::new(gtk::Orientation::Vertical);
         toolbar.append(&sep3);
 
-        let btn_enhance = gtk::Button::with_label("Enhance");
-        btn_enhance.set_tooltip_text(Some("Enhance image (brightness/contrast)"));
+        let btn_enhance = gtk::Button::with_label(&crate::i18n::tr("Enhance"));
+        btn_enhance.set_tooltip_text(Some(&crate::i18n::tr("Enhance image")));
         toolbar.append(&btn_enhance);
 
-        let btn_lens = gtk::ToggleButton::with_label("Lens");
+        let btn_lens = gtk::ToggleButton::with_label(&crate::i18n::tr("Lens"));
         btn_lens.set_tooltip_text(Some(&crate::i18n::tr("Magnifying lens")));
         toolbar.append(&btn_lens);
 
         let btn_openwith = gtk::Button::from_icon_name("system-run");
-        btn_openwith.set_tooltip_text(Some("Open with…"));
+        btn_openwith.set_tooltip_text(Some(&crate::i18n::tr("Open with…")));
         toolbar.append(&btn_openwith);
 
         let btn_bookmarks = gtk::MenuButton::new();
@@ -385,7 +385,7 @@ impl Ui {
         toolbar.append(&btn_bookmarks);
 
         let btn_about = gtk::Button::from_icon_name("help-about");
-        btn_about.set_tooltip_text(Some("About"));
+        btn_about.set_tooltip_text(Some(&crate::i18n::tr("About")));
         toolbar.append(&btn_about);
 
         let bookmarks_popover = gtk::Popover::new();
@@ -396,7 +396,7 @@ impl Ui {
         toolbar.append(&btn_library);
 
         let btn_prefs = gtk::Button::from_icon_name("preferences-system");
-        btn_prefs.set_tooltip_text(Some("Preferences (not ported yet)"));
+        btn_prefs.set_tooltip_text(Some(&crate::i18n::tr("Preferences")));
         toolbar.append(&btn_prefs);
 
         // Clicking toolbar buttons must not move keyboard focus away from the
@@ -2465,8 +2465,8 @@ impl Ui {
         let spin = gtk::SpinButton::with_range(1.0, n as f64, 1.0);
         spin.set_value((self.state.page + 1) as f64);
 
-        let ok = gtk::Button::with_label("Go");
-        let cancel = gtk::Button::with_label("Cancel");
+        let ok = gtk::Button::with_label(&crate::i18n::tr("Go"));
+        let cancel = gtk::Button::with_label(&crate::i18n::tr("Cancel"));
 
         let vbox = gtk::Box::new(gtk::Orientation::Vertical, 8);
         vbox.set_margin_top(12);
@@ -2720,12 +2720,12 @@ impl Ui {
         contrast.set_value_pos(gtk::PositionType::Top);
         contrast.set_hexpand(true);
 
-        let auto_c = gtk::CheckButton::with_label("Auto contrast");
+        let auto_c = gtk::CheckButton::with_label(&crate::i18n::tr("Auto contrast"));
         auto_c.set_active(self.state.prefs.auto_contrast);
 
-        let apply = gtk::Button::with_label("Apply");
+        let apply = gtk::Button::with_label(&crate::i18n::tr("Apply"));
         apply.add_css_class("suggested-action");
-        let close = gtk::Button::with_label("Close");
+        let close = gtk::Button::with_label(&crate::i18n::tr("Close"));
 
         let grid = gtk::Grid::new();
         grid.set_row_spacing(10);
@@ -2734,11 +2734,11 @@ impl Ui {
         grid.set_margin_bottom(14);
         grid.set_margin_start(16);
         grid.set_margin_end(16);
-        let bl = gtk::Label::new(Some("Brightness:"));
+        let bl = gtk::Label::new(Some(&crate::i18n::tr("Brightness:")));
         bl.set_xalign(0.0);
         grid.attach(&bl, 0, 0, 1, 1);
         grid.attach(&bright, 1, 0, 1, 1);
-        let cl = gtk::Label::new(Some("Contrast:"));
+        let cl = gtk::Label::new(Some(&crate::i18n::tr("Contrast:")));
         cl.set_xalign(0.0);
         grid.attach(&cl, 0, 1, 1, 1);
         grid.attach(&contrast, 1, 1, 1, 1);
@@ -2946,7 +2946,7 @@ impl Ui {
             return;
         };
         let dlg = gtk::Window::new();
-        dlg.set_title(Some("Open with…"));
+        dlg.set_title(Some(&crate::i18n::tr("Open with…")));
         dlg.set_transient_for(Some(&self.window));
         dlg.set_modal(true);
         dlg.set_default_size(420, 320);
@@ -2963,7 +2963,7 @@ impl Ui {
             l.set_hexpand(true);
             l.set_xalign(0.0);
             row.append(&l);
-            let run = gtk::Button::with_label("Run");
+            let run = gtk::Button::with_label(&crate::i18n::tr("Run"));
             row.append(&run);
             list.append(&row);
             let command = command.clone();
@@ -2984,9 +2984,9 @@ impl Ui {
 
         let entry = gtk::Entry::new();
         entry.set_placeholder_text(Some("Command (use %f for the file)"));
-        let remember = gtk::CheckButton::with_label("Remember this command");
-        let run_now = gtk::Button::with_label("Run");
-        let close = gtk::Button::with_label("Close");
+        let remember = gtk::CheckButton::with_label(&crate::i18n::tr("Remember this command"));
+        let run_now = gtk::Button::with_label(&crate::i18n::tr("Run"));
+        let close = gtk::Button::with_label(&crate::i18n::tr("Close"));
 
         let form = gtk::Box::new(gtk::Orientation::Vertical, 6);
         form.set_margin_top(8);

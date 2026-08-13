@@ -320,9 +320,9 @@ pub fn show_library(rc: Rc<RefCell<Ui>>) {
             let mut s = state.borrow_mut();
             if let Some(id) = s.last_activated.take() {
                 s.db.remove_book(id);
-                status.set_text("Book removed from the library.");
+                status.set_text(&crate::i18n::tr("Book removed from the library."));
             } else {
-                status.set_text("No book selected.");
+                status.set_text(&crate::i18n::tr("No book selected."));
             }
             drop(s);
             refresh_books(&state, &book_flow, &win);

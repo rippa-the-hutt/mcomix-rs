@@ -328,7 +328,7 @@ impl PrefsForm {
 
 fn capture_binding(parent: &impl IsA<gtk::Window>, on_done: Rc<dyn Fn(Binding)>) {
     let win = gtk::Window::new();
-    win.set_title(Some("Press a key…"));
+    win.set_title(Some(&crate::i18n::tr("Press a key…")));
     win.set_transient_for(Some(parent));
     win.set_modal(true);
     win.set_resizable(false);
@@ -342,7 +342,7 @@ fn capture_binding(parent: &impl IsA<gtk::Window>, on_done: Rc<dyn Fn(Binding)>)
         "Press the key or key combination to assign.\nPress Escape to cancel.",
     ));
     vbox.append(&label);
-    let cancel = gtk::Button::with_label("Cancel");
+    let cancel = gtk::Button::with_label(&crate::i18n::tr("Cancel"));
     vbox.append(&cancel);
     win.set_child(Some(&vbox));
 
@@ -410,7 +410,7 @@ fn build_action_row(
     };
     refresh();
 
-    let change = gtk::Button::with_label("Change…");
+    let change = gtk::Button::with_label(&crate::i18n::tr("Change…"));
     {
         let bindings = bindings.clone();
         let refresh = refresh.clone();
@@ -427,7 +427,7 @@ fn build_action_row(
     }
     row.append(&change);
 
-    let reset = gtk::Button::with_label("Reset");
+    let reset = gtk::Button::with_label(&crate::i18n::tr("Reset"));
     {
         let bindings = bindings.clone();
         let refresh = refresh.clone();
