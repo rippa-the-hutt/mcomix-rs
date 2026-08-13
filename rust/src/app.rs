@@ -152,6 +152,17 @@ pub struct AppState {
     pub prefetch_gen: u64,
     /// Configurable keyboard bindings.
     pub bindings: crate::keybindings::BindingMap,
+    /// Magnifying lens enabled.
+    pub lens_enabled: bool,
+    /// Raw (transformed+enhanced) RGBA of the currently displayed pages
+    /// (slots 0/1), used by the lens to crop around the cursor.
+    pub lens_source: Vec<Option<(u32, u32, Vec<u8>)>>,
+    /// Displayed geometry of each slot (x, y, w, h) from the last redraw,
+    /// used to map cursor -> source coordinates.
+    pub displayed: Vec<(i32, i32, i32, i32)>,
+    /// (x0, y0, w, h, lens_size, mag) of the last rendered lens crop, to
+    /// avoid re-decoding/resizing on every motion event.
+    pub lens_last_crop: Option<(u32, u32, u32, u32, u32, u32)>,
     /// Bookmarks store.
     pub bookmarks: crate::bookmarks::Bookmarks,
 }
@@ -205,6 +216,10 @@ impl Default for AppState {
             prefetch_gen: 0,
             bindings: crate::keybindings::BindingMap::load(),
             bookmarks: crate::bookmarks::Bookmarks::load(),
+            lens_enabled: false,
+            lens_source: vec![None, None],
+            displayed: vec![(0, 0, 0, 0), (0, 0, 0, 0)],
+            lens_last_crop: None,
             thumb_cells: Vec::new(),
             thumb_pics: Vec::new(),
             thumb_wanted_last: std::collections::BTreeSet::new(),
@@ -233,6 +248,8 @@ pub struct Ui {
     pub btn_library: gtk::Button,
     pub btn_prefs: gtk::Button,
     pub btn_enhance: gtk::Button,
+    pub btn_lens: gtk::ToggleButton,
+    pub lens_pic: gtk::Picture,
     pub btn_openwith: gtk::Button,
     pub btn_bookmarks: gtk::MenuButton,
     pub bookmarks_popover: gtk::Popover,
@@ -346,6 +363,10 @@ impl Ui {
         btn_enhance.set_tooltip_text(Some("Enhance image (brightness/contrast)"));
         toolbar.append(&btn_enhance);
 
+        let btn_lens = gtk::ToggleButton::with_label("Lens");
+        btn_lens.set_tooltip_text(Some("Magnifying lens"));
+        toolbar.append(&btn_lens);
+
         let btn_openwith = gtk::Button::from_icon_name("system-run");
         btn_openwith.set_tooltip_text(Some("Open with…"));
         toolbar.append(&btn_openwith);
@@ -420,6 +441,20 @@ impl Ui {
         osd.set_visible(false);
         viewer_overlay.add_overlay(&osd);
 
+        // Magnifying lens overlay (positioned at the cursor via margins).
+        let lens_pic = gtk::Picture::new();
+        lens_pic.set_can_shrink(true);
+        lens_pic.set_content_fit(gtk::ContentFit::Fill);
+        lens_pic.set_halign(gtk::Align::Start);
+        lens_pic.set_valign(gtk::Align::Start);
+        lens_pic.set_css_classes(&["lens"]);
+        // Let pointer events pass through so the motion controller on the
+        // scrolled window keeps receiving events even when the cursor is over
+        // the magnifier itself (otherwise the lens freezes under the cursor).
+        lens_pic.set_can_target(false);
+        lens_pic.set_visible(false);
+        viewer_overlay.add_overlay(&lens_pic);
+
         // ---- thumbnails ----
         let thumb_box = gtk::FlowBox::new();
         thumb_box.set_max_children_per_line(1);
@@ -482,6 +517,8 @@ impl Ui {
             btn_library,
             btn_prefs,
             btn_enhance,
+            btn_lens,
+            lens_pic,
             btn_openwith,
             btn_bookmarks,
             bookmarks_popover,
@@ -768,6 +805,15 @@ impl Ui {
             let r = rc.clone();
             move |_| r.borrow_mut().rotate_90()
         });
+        self.btn_lens.connect_toggled({
+            let r = rc.clone();
+            move |b| {
+                let mut ui = r.borrow_mut();
+                if b.is_active() != ui.state.lens_enabled {
+                    ui.toggle_lens();
+                }
+            }
+        });
         self.btn_enhance.connect_clicked({
             let r = rc.clone();
             move |_| {
@@ -1015,6 +1061,8 @@ impl Ui {
             let travel_motion = total_travel.clone();
             let r_motion = rc.clone();
             motion.connect_motion(move |_c, x, y| {
+                // Lens follows the cursor whenever enabled.
+                r_motion.borrow_mut().update_lens(x, y);
                 if !dragging_motion.get() {
                     return;
                 }
@@ -1125,6 +1173,10 @@ impl Ui {
                         self.state.cache.clear();
                         self.state.textures = vec![None, None];
                         self.state.sizes = vec![(0, 0), (0, 0)];
+                        self.state.lens_source = vec![None, None];
+                        self.state.displayed = vec![(0, 0, 0, 0), (0, 0, 0, 0)];
+                        self.state.lens_last_crop = None;
+                        self.lens_pic.set_visible(false);
                         self.window.set_title(Some(&format!("{name} — MComix3")));
                         self.show_osd(&format!(
                             "{name} — {} pages",
@@ -1241,13 +1293,22 @@ impl Ui {
         }
         self.state.textures = vec![None, None];
         self.state.sizes = vec![(0, 0), (0, 0)];
+        self.state.lens_source = vec![None, None];
+        self.state.lens_last_crop = None;
         for p in res.pages {
             let idx = p.idx;
+            let (w, h) = (p.w, p.h);
+            let rgba = p.rgba.clone();
             // Map the page index back to its display slot (0 or 1).
-            if let Some((tex, w, h)) = self.cache_decoded(p) {
+            if let Some((tex, tw, th)) = self.cache_decoded(p) {
                 if idx >= self.state.page && idx - self.state.page < 2 {
-                    self.state.textures[idx - self.state.page] = Some(tex);
-                    self.state.sizes[idx - self.state.page] = (w, h);
+                    let slot = idx - self.state.page;
+                    self.state.textures[slot] = Some(tex);
+                    self.state.sizes[slot] = (tw, th);
+                    // Keep the raw pixels for the lens (cropping needs them).
+                    if self.state.lens_enabled {
+                        self.state.lens_source[slot] = Some((w, h, rgba));
+                    }
                 }
             }
         }
@@ -1382,6 +1443,8 @@ impl Ui {
 
         let mut total_w = 0.0_f64;
         let mut total_h = 0.0_f64;
+        let mut offset_x = 0.0_f64;
+        self.state.displayed = vec![(0, 0, 0, 0), (0, 0, 0, 0)];
         for (slot, &i) in order.iter().enumerate() {
             let pic = &self.pics[i];
             match (self.state.textures[i].as_ref(), zoomed.get(slot)) {
@@ -1389,6 +1452,13 @@ impl Ui {
                     pic.set_paintable(Some(tex));
                     pic.set_size_request(*w as i32, *h as i32);
                     self.content.append(pic);
+                    self.state.displayed[i] = (
+                        offset_x as i32,
+                        0,
+                        *w as i32,
+                        *h as i32,
+                    );
+                    offset_x += *w as f64;
                     total_w += *w as f64;
                     total_h = total_h.max(*h as f64);
                 }
@@ -1396,6 +1466,9 @@ impl Ui {
                     pic.set_paintable(None::<&gdk::Texture>);
                 }
             }
+        }
+        if double {
+            offset_x += 2.0; // spacing between pages
         }
         if double {
             total_w += 2.0; // spacing between pages
@@ -1518,6 +1591,7 @@ impl Ui {
             A::Minimize => self.window.minimize(),
             A::AddBookmark => self.add_bookmark(rc),
             A::EditBookmarks => self.edit_bookmarks(rc),
+            A::ToggleLens => self.toggle_lens(),
             A::ExitFullscreen => {
                 if self.window.is_fullscreen() {
                     self.window.unfullscreen();
@@ -1914,10 +1988,6 @@ impl Ui {
 
     pub fn toggle_keep_transformation(&mut self) {
         self.state.prefs.keep_transformation = !self.state.prefs.keep_transformation;
-    }
-
-    pub fn toggle_lens(&mut self) {
-        self.notice("The magnifying lens is not ported yet.");
     }
 
     /// Show a transient OSD message at the bottom of the viewer.
@@ -2426,6 +2496,135 @@ impl Ui {
         dlg.present();
     }
 
+    // ================= magnifying lens =================
+
+    pub fn toggle_lens(&mut self) {
+        self.state.lens_enabled = !self.state.lens_enabled;
+        self.btn_lens.set_active(self.state.lens_enabled);
+        if self.state.lens_enabled {
+            // Ensure the current page's raw pixels are available for cropping.
+            if self.state.lens_source.iter().all(|s| s.is_none()) {
+                // Re-decode the current page through a fresh request; the
+                // apply_page_result path will populate lens_source.
+                self.request_pages(ScrollDest::Keep);
+            }
+        } else {
+            self.lens_pic.set_visible(false);
+        }
+    }
+
+    /// Update the magnifying lens for a cursor position in scrolled-window
+    /// coordinates.
+    fn update_lens(&mut self, x: f64, y: f64) {
+        if !self.state.lens_enabled {
+            return;
+        }
+        let lens_size = self.state.prefs.lens_size.max(40) as f64;
+        let mag = self.state.prefs.lens_magnification.max(1) as f64;
+
+        // Cursor in content coordinates. The content box is centered in the
+        // scrolled window, so subtract its on-screen offset, then add the
+        // scroll position.
+        let ca = self.content.allocation();
+        let hadj = self.scrolled.hadjustment().value();
+        let vadj = self.scrolled.vadjustment().value();
+        let cx = x - ca.x() as f64 + hadj;
+        let cy = y - ca.y() as f64 + vadj;
+
+        // Find which displayed slot the cursor is over.
+        let mut target: Option<usize> = None;
+        let mut src: Option<(f64, f64, f64, f64)> = None; // (fx, fy, scale, slot dims)
+        for slot in 0..2 {
+            let (dx, dy, dw, dh) = self.state.displayed[slot];
+            if dw <= 0 || dh <= 0 {
+                continue;
+            }
+            let (dx, dy, dw, dh) = (dx as f64, dy as f64, dw as f64, dh as f64);
+            if cx >= dx && cx < dx + dw && cy >= dy && cy < dy + dh {
+                let fx = (cx - dx) / dw;
+                let fy = (cy - dy) / dh;
+                target = Some(slot);
+                src = Some((fx, fy, dw, dh));
+                break;
+            }
+        }
+        let (Some(slot), Some((fx, fy, dw, dh))) = (target, src) else {
+            self.lens_pic.set_visible(false);
+            return;
+        };
+        let Some((sw, sh, rgba)) = self.state.lens_source[slot].as_ref() else {
+            self.lens_pic.set_visible(false);
+            return;
+        };
+        let (sw, sh) = (*sw, *sh);
+        if sw == 0 || sh == 0 || rgba.is_empty() {
+            self.lens_pic.set_visible(false);
+            return;
+        }
+
+        // Square crop in source pixels around the cursor, magnified by `mag`
+        // relative to the displayed scale (mirrors lens.py).
+        let scale = sw as f64 / dw;
+        let crop = (lens_size * scale / mag).max(2.0);
+        let sx = fx * sw as f64;
+        let sy = fy * sh as f64;
+        let mut x0 = sx - crop / 2.0;
+        let mut y0 = sy - crop / 2.0;
+        let mut cw = crop;
+        let mut ch = crop;
+        if x0 < 0.0 {
+            cw += x0;
+            x0 = 0.0;
+        }
+        if y0 < 0.0 {
+            ch += y0;
+            y0 = 0.0;
+        }
+        cw = cw.min(sw as f64 - x0).max(1.0);
+        ch = ch.min(sh as f64 - y0).max(1.0);
+        if cw < 1.0 || ch < 1.0 {
+            self.lens_pic.set_visible(false);
+            return;
+        }
+
+        let x0i = x0 as u32;
+        let y0i = y0 as u32;
+        let cwi = cw as u32;
+        let chi = ch as u32;
+        let key = (x0i, y0i, cwi, chi, lens_size as u32, mag as u32);
+        if self.state.lens_last_crop != Some(key) {
+            self.state.lens_last_crop = Some(key);
+            let mut crop_img = image::RgbaImage::new(cwi, chi);
+            let stride = sw as usize * 4;
+            for yy in 0..chi as usize {
+                let sy = (y0i as usize + yy) * stride;
+                let drow = sy + x0i as usize * 4;
+                let srow = &rgba[drow..drow + cwi as usize * 4];
+                crop_img.as_mut()[yy * cwi as usize * 4..(yy + 1) * cwi as usize * 4]
+                    .copy_from_slice(srow);
+            }
+            let zoomed = image::imageops::resize(
+                &crop_img,
+                lens_size as u32,
+                lens_size as u32,
+                image::imageops::FilterType::Triangle,
+            );
+            let tex = image_loader::texture_from_rgba(&zoomed);
+            self.lens_pic.set_paintable(Some(&tex));
+            self.lens_pic.set_size_request(lens_size as i32, lens_size as i32);
+        }
+
+        // Position the lens centered on the cursor, clamped to the viewport.
+        let alloc = self.scrolled.allocation();
+        let vw = alloc.width() as f64;
+        let vh = alloc.height() as f64;
+        let lx = (x - lens_size / 2.0).clamp(0.0, (vw - lens_size).max(0.0));
+        let ly = (y - lens_size / 2.0).clamp(0.0, (vh - lens_size).max(0.0));
+        self.lens_pic.set_margin_start(lx as i32);
+        self.lens_pic.set_margin_top(ly as i32);
+        self.lens_pic.set_visible(true);
+    }
+
     // ================= open with =================
 
     /// Run an external command on the current file (`%f` is substituted with
@@ -2877,7 +3076,9 @@ fn apply_background_css(prefs: &Prefs) {
          .page-num {{ font-size: 8pt; }} \
          .osd {{ background-color: rgba(0,0,0,0.72); color: #fff; \
                  padding: 6px 12px; border-radius: 5px; \
-                 font-weight: bold; }}"
+                 font-weight: bold; }} \
+         .lens {{ border: 2px solid rgba(255,255,255,0.9); \
+                  box-shadow: 0 0 6px rgba(0,0,0,0.6); }}"
     );
     let provider = gtk::CssProvider::new();
     provider.load_from_string(&css);

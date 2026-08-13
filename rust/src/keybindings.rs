@@ -56,6 +56,7 @@ pub enum Action {
     ExitFullscreen,
     AddBookmark,
     EditBookmarks,
+    ToggleLens,
 }
 
 impl Action {
@@ -102,6 +103,7 @@ impl Action {
             ExitFullscreen => "exit_fullscreen",
             AddBookmark => "add_bookmark",
             EditBookmarks => "edit_bookmarks",
+            ToggleLens => "lens",
         }
     }
 
@@ -148,6 +150,7 @@ impl Action {
             ExitFullscreen => "Exit fullscreen",
             AddBookmark => "Add bookmark",
             EditBookmarks => "Edit bookmarks…",
+            ToggleLens => "Magnifying lens",
         }
     }
 
@@ -160,6 +163,7 @@ impl Action {
             Rotate180, FlipH, FlipV, ToggleDoublePage, ToggleManga, ToggleFullscreen,
             ToggleThumbnails, ToggleSlideshow, ToggleHideAll, ToggleMenubar, InvertScroll,
             ShowInfo, Minimize, ExitFullscreen, AddBookmark, EditBookmarks,
+            ToggleLens,
         ]
     }
 }
@@ -275,6 +279,7 @@ impl BindingMap {
             ("exit_fullscreen", &["Escape"]),
             ("add_bookmark", &["<Control>d"]),
             ("edit_bookmarks", &["<Control>b"]),
+            ("lens", &["l"]),
         ];
         let mut map = Vec::new();
         for (name, accels) in defs {

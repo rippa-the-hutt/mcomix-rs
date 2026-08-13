@@ -130,6 +130,8 @@ pub struct Prefs {
     pub contrast: f64,
     pub auto_contrast: bool,
     pub show_osd: bool,
+    pub lens_size: u32,
+    pub lens_magnification: u32,
 
     // Window geometry
     pub window_x: i32,
@@ -202,6 +204,8 @@ impl Default for Prefs {
             contrast: 1.0,
             auto_contrast: false,
             show_osd: true,
+            lens_size: 200,
+            lens_magnification: 2,
             window_x: 0,
             window_y: 0,
             window_width: 1024,

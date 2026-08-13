@@ -59,7 +59,7 @@ rust/
 | `library/*` (sqlite book DB) | `library.rs` + `library_dialog.rs` | ✅ rusqlite backend (books/collections/recent/watchlist) + library window |
 | `keybindings.py` + editor | `keybindings.rs` + Shortcuts tab | ✅ configurable (JSON `keybindings.conf`) |
 | `enhance_backend.py` (contrast/brightness…) | `app.rs` + `image_loader.rs` | ✅ brightness/contrast/auto-contrast (saturation/sharpness ⏳) |
-| `lens.py` (magnifier) | — | ⏳ deferred (overlay crop) |
+| `lens.py` (magnifier) | `app.rs` lens overlay | ✅ cursor-following magnifier (l key + toolbar) |
 | `osd.py` | `app.rs` OSD overlay | ✅ transient page/file OSD |
 | `openwith.py` | `app.rs` | ✅ Open-with dialog + remembered commands |
 | `archive_packer.py` (edit archive) | — | ⏳ later (`zip` write support) |
@@ -123,8 +123,7 @@ Windows notes:
 
 ## What's next (suggested order)
 
-1. **Magnifying lens** (overlay crop of the current page following the cursor).
-2. **Recursive archives** (archives inside archives).
+1. **Recursive archives** (archives inside archives).
 3. **i18n** (reuse the existing `.po` files via gettext-rs).
 5. **AppImage** for a truly standalone Linux distribution.
 6. **PDF polish**: port the optimal-DPI trace pass from `pdf_external.py`.

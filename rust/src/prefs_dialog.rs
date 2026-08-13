@@ -108,6 +108,8 @@ struct PrefsForm {
     auto_rotate_exif: gtk::CheckButton,
     show_scrollbar: gtk::CheckButton,
     show_osd: gtk::CheckButton,
+    lens_size: gtk::SpinButton,
+    lens_mag: gtk::SpinButton,
     zoom_mode: gtk::DropDown,
     fit_to_size_mode: gtk::DropDown,
     fit_to_size_px: gtk::SpinButton,
@@ -142,6 +144,8 @@ impl PrefsForm {
             auto_rotate_exif: check("Automatically rotate images according to their metadata", p.auto_rotate_from_exif),
             show_scrollbar: check("Show scrollbars", p.show_scrollbar),
             show_osd: check("Show on-screen page indicator", p.show_osd),
+            lens_size: spin(p.lens_size as f64, 60.0, 600.0, 10.0, 0),
+            lens_mag: spin(p.lens_magnification as f64, 1.0, 8.0, 1.0, 0),
             zoom_mode: dropdown(
                 &["Best fit", "Fit width", "Fit height", "Fit size", "Manual"],
                 p.zoom_mode.clamp(0, 4) as u32,
@@ -217,6 +221,8 @@ impl PrefsForm {
         add_row(&grid, "Fit to size mode:", Some(&self.fit_to_size_mode), &mut row);
         add_row(&grid, "Fixed size for this mode (px):", Some(&self.fit_to_size_px), &mut row);
         add_row(&grid, "Slideshow delay (seconds):", Some(&self.slideshow_delay), &mut row);
+        add_row(&grid, "Lens size (pixels):", Some(&self.lens_size), &mut row);
+        add_row(&grid, "Lens magnification:", Some(&self.lens_mag), &mut row);
         let page = gtk::ScrolledWindow::new();
         page.set_child(Some(&grid));
         page.set_vexpand(true);
@@ -275,6 +281,8 @@ impl PrefsForm {
         };
         p.fit_to_size_px = self.fit_to_size_px.value() as u32;
         p.slideshow_delay = (self.slideshow_delay.value() * 1000.0) as u64;
+        p.lens_size = self.lens_size.value() as u32;
+        p.lens_magnification = self.lens_mag.value() as u32;
         p.number_of_pixels_to_scroll_per_key_event = self.pixels_key.value() as u32;
         p.number_of_pixels_to_scroll_per_mouse_wheel_event = self.pixels_wheel.value() as u32;
         p.smart_scroll_percentage = self.smart_pct.value();
