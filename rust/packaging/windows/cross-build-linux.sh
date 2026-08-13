@@ -21,7 +21,9 @@ VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
 TARGET="x86_64-pc-windows-gnu"
 MIRROR="https://mirror.msys2.org/mingw/mingw64"
 WORK="${XDG_CACHE_HOME:-$HOME/.cache}/mcomix-rs-cross"
-SYSROOT="$WORK/sysroot"
+# MSYS2 packages extract to a top-level `mingw64/` tree under $WORK.
+SYSROOT="$WORK"
+MINGW="$SYSROOT/mingw64"
 DIST_DIR="dist/mcomix-rs-win64"
 PORTABLE="dist/mcomix-rs-${VERSION}-windows-x86_64.zip"
 SETUP="dist/mcomix-rs-setup-${VERSION}.exe"
@@ -40,15 +42,16 @@ gtk4 gdk-pixbuf2 glib2 pango cairo harfbuzz freetype fontconfig fribidi
 libpng libjpeg-turbo libtiff libwebp zlib zstd xz bzip2 expat brotli
 libunistring graphite2 libffi pcre2 gettext libiconv libxml2 libdatrie
 libthai libepoxy graphene adwaita-icon-theme gcc-libs winpthreads
+vulkan-loader
 "
 
 mkdir -p "$WORK"
-if [ ! -d "$SYSROOT/usr" ] && [ ! -d "$SYSROOT/bin" ]; then
+if [ ! -d "$MINGW/bin" ]; then
     echo "==> Fetching MSYS2 mingw-w64 packages into $WORK"
     for pkg in $PACKAGES; do
-        # Pick the newest matching .pkg.tar.zst from the mirror listing.
-        url="$MIRROR/mingw-w64-x86_64-$pkg-"
-        file="$(curl -s "$MIRROR/" | grep -oE "mingw-w64-x86_64-$pkg-[0-9][^\"]*\.pkg\.tar\.zst" | sort -V | tail -1 || true)"
+        # Pick the newest matching .pkg.tar.zst from the mirror listing
+        # (the mirror redirects; -L follows it).
+        file="$(curl -fsSL "$MIRROR/" | grep -oE "mingw-w64-x86_64-$pkg-[0-9][^\"]*\.pkg\.tar\.zst" | sort -V | tail -1 || true)"
         if [ -z "$file" ]; then
             echo "WARNING: no package found for $pkg"
             continue
@@ -59,15 +62,14 @@ if [ ! -d "$SYSROOT/usr" ] && [ ! -d "$SYSROOT/bin" ]; then
         fi
         tar --zstd -xf "$WORK/$file" -C "$WORK"
     done
-    # Move the mingw64/ tree into sysroot/ (bin, lib, share at the top).
-    mkdir -p "$SYSROOT"
-    if [ -d "$WORK/mingw64" ]; then
-        cp -a "$WORK/mingw64/." "$SYSROOT/"
-    fi
 fi
 
+# MSYS2 .pc files use prefix=/mingw64; PKG_CONFIG_SYSROOT_DIR rewrites that to
+# $SYSROOT/mingw64, and PKG_CONFIG_LIBDIR points at the cross .pc files.
 export PKG_CONFIG_ALLOW_CROSS=1
-export PKG_CONFIG_PATH="$SYSROOT/lib/pkgconfig"
+export PKG_CONFIG_LIBDIR="$MINGW/lib/pkgconfig"
+export PKG_CONFIG_SYSROOT_DIR="$SYSROOT"
+export PKG_CONFIG_PATH="$MINGW/lib/pkgconfig"
 export CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER="x86_64-w64-mingw32-gcc"
 
 echo "==> Cross-compiling (release)"
@@ -90,7 +92,7 @@ copy_dll() { # name
     if echo "$copied" | grep -qx "$dll"; then return; fi
     copied="$copied
 $dll"
-    local src="$SYSROOT/bin/$dll"
+    local src="$MINGW/bin/$dll"
     if [ ! -f "$src" ]; then
         echo "WARNING: $dll not found in sysroot"
         return
@@ -106,7 +108,7 @@ for dep in $(collect_deps "$DIST_DIR/mcomix-rs.exe"); do
 done
 
 echo "==> Copying GTK runtime data"
-SHARE="$SYSROOT/share"
+SHARE="$MINGW/share"
 # GSettings schemas (compile with the host tool if the package lacks the cache).
 if [ -d "$SHARE/glib-2.0/schemas" ]; then
     mkdir -p "$DIST_DIR/share/glib-2.0/schemas"
@@ -121,7 +123,7 @@ if [ -d "$SHARE/icons/Adwaita" ]; then
     cp -r "$SHARE/icons/Adwaita" "$DIST_DIR/share/icons/"
 fi
 # gdk-pixbuf loaders (DLLs + cache).
-LOADERS="$SYSROOT/lib/gdk-pixbuf-2.0/2.10.0/loaders"
+LOADERS="$MINGW/lib/gdk-pixbuf-2.0/2.10.0/loaders"
 if [ -d "$LOADERS" ]; then
     mkdir -p "$DIST_DIR/lib/gdk-pixbuf-2.0/2.10.0/loaders"
     cp "$LOADERS"/*.dll "$DIST_DIR/lib/gdk-pixbuf-2.0/2.10.0/loaders/" 2>/dev/null || true
