@@ -37,7 +37,7 @@ pub fn show_library(rc: Rc<RefCell<Ui>>) {
     }));
 
     let win = gtk::Window::new();
-    win.set_title(Some("Library"));
+    win.set_title(Some(&crate::i18n::tr("Library")));
     win.set_default_size(980, 640);
     win.set_transient_for(Some(&rc.borrow().window));
 
@@ -50,7 +50,7 @@ pub fn show_library(rc: Rc<RefCell<Ui>>) {
     collection_scroller.set_vexpand(true);
     collection_scroller.set_min_content_height(300);
 
-    let new_collection = gtk::Button::with_label("New collection…");
+    let new_collection = gtk::Button::with_label(&crate::i18n::tr("New collection…"));
 
     let left = gtk::Box::new(gtk::Orientation::Vertical, 4);
     left.append(&collection_scroller);
@@ -71,10 +71,10 @@ pub fn show_library(rc: Rc<RefCell<Ui>>) {
     book_scroller.set_min_content_height(360);
 
     // ---- controls ----
-    let add_books = gtk::Button::with_label("Add books…");
-    let remove_book = gtk::Button::with_label("Remove from library");
-    let watch_dir = gtk::Button::with_label("Watch directory…");
-    let scan = gtk::Button::with_label("Scan for new books");
+    let add_books = gtk::Button::with_label(&crate::i18n::tr("Add books…"));
+    let remove_book = gtk::Button::with_label(&crate::i18n::tr("Remove from library"));
+    let watch_dir = gtk::Button::with_label(&crate::i18n::tr("Watch directory…"));
+    let scan = gtk::Button::with_label(&crate::i18n::tr("Scan for new books"));
     let status = gtk::Label::new(Some(""));
     status.set_xalign(0.0);
     status.set_hexpand(true);
@@ -123,8 +123,8 @@ pub fn show_library(rc: Rc<RefCell<Ui>>) {
             // store id on the row via the child widget's data
             let _ = id;
         };
-        add_row(list, "All books", COLLECTION_ALL);
-        add_row(list, "Recent", COLLECTION_RECENT_VIEW);
+        add_row(list, &crate::i18n::tr("All books"), COLLECTION_ALL);
+        add_row(list, &crate::i18n::tr("Recent"), COLLECTION_RECENT_VIEW);
         for c in &collections {
             add_row(list, &c.name, c.id);
         }
@@ -232,8 +232,8 @@ pub fn show_library(rc: Rc<RefCell<Ui>>) {
             let Some(row) = row else { return };
             let name = row.child().and_then(|c| c.downcast::<gtk::Label>().ok()).map(|l| l.text().to_string()).unwrap_or_default();
             let id = match name.as_str() {
-                "All books" => COLLECTION_ALL,
-                "Recent" => COLLECTION_RECENT_VIEW,
+                n if n == crate::i18n::tr("All books") => COLLECTION_ALL,
+                n if n == crate::i18n::tr("Recent") => COLLECTION_RECENT_VIEW,
                 _ => {
                     let s = state.borrow();
                     s.db.get_collections().iter().find(|c| c.name == name).map(|c| c.id).unwrap_or(COLLECTION_ALL)
@@ -377,14 +377,14 @@ pub fn show_library(rc: Rc<RefCell<Ui>>) {
         let win = win.clone();
         move |_| {
             let dlg = gtk::Window::new();
-            dlg.set_title(Some("New collection"));
+            dlg.set_title(Some(&crate::i18n::tr("New collection")));
             dlg.set_transient_for(Some(&win));
             dlg.set_modal(true);
             dlg.set_resizable(false);
             let entry = gtk::Entry::new();
             entry.set_placeholder_text(Some("Collection name"));
-            let ok = gtk::Button::with_label("Create");
-            let cancel = gtk::Button::with_label("Cancel");
+            let ok = gtk::Button::with_label(&crate::i18n::tr("Create"));
+            let cancel = gtk::Button::with_label(&crate::i18n::tr("Cancel"));
             let boxv = gtk::Box::new(gtk::Orientation::Vertical, 8);
             boxv.set_margin_top(12);
             boxv.set_margin_bottom(12);

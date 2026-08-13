@@ -290,15 +290,15 @@ impl Ui {
         toolbar.set_margin_end(4);
 
         let btn_open = gtk::Button::from_icon_name("document-open");
-        btn_open.set_tooltip_text(Some("Open"));
+        btn_open.set_tooltip_text(Some(&crate::i18n::tr("Open")));
         toolbar.append(&btn_open);
 
         let btn_prev = gtk::Button::from_icon_name("go-previous");
-        btn_prev.set_tooltip_text(Some("Previous page"));
+        btn_prev.set_tooltip_text(Some(&crate::i18n::tr("Previous page")));
         toolbar.append(&btn_prev);
 
         let btn_next = gtk::Button::from_icon_name("go-next");
-        btn_next.set_tooltip_text(Some("Next page"));
+        btn_next.set_tooltip_text(Some(&crate::i18n::tr("Next page")));
         toolbar.append(&btn_next);
 
         let sep1 = gtk::Separator::new(gtk::Orientation::Vertical);
@@ -312,15 +312,15 @@ impl Ui {
         toolbar.append(&zoom_dropdown);
 
         let btn_zoom_out = gtk::Button::from_icon_name("zoom-out");
-        btn_zoom_out.set_tooltip_text(Some("Zoom out"));
+        btn_zoom_out.set_tooltip_text(Some(&crate::i18n::tr("Zoom out")));
         toolbar.append(&btn_zoom_out);
 
         let btn_zoom_in = gtk::Button::from_icon_name("zoom-in");
-        btn_zoom_in.set_tooltip_text(Some("Zoom in"));
+        btn_zoom_in.set_tooltip_text(Some(&crate::i18n::tr("Zoom in")));
         toolbar.append(&btn_zoom_in);
 
         let btn_zoom_orig = gtk::Button::from_icon_name("zoom-original");
-        btn_zoom_orig.set_tooltip_text(Some("Normal size"));
+        btn_zoom_orig.set_tooltip_text(Some(&crate::i18n::tr("Normal size")));
         toolbar.append(&btn_zoom_orig);
 
         let btn_rotate = gtk::Button::from_icon_name("object-rotate-right");
@@ -342,12 +342,12 @@ impl Ui {
 
         let btn_slideshow = gtk::ToggleButton::new();
         btn_slideshow.set_icon_name("media-playback-start");
-        btn_slideshow.set_tooltip_text(Some("Slideshow"));
+        btn_slideshow.set_tooltip_text(Some(&crate::i18n::tr("Slideshow")));
         toolbar.append(&btn_slideshow);
 
         let btn_fullscreen = gtk::ToggleButton::new();
         btn_fullscreen.set_icon_name("view-fullscreen");
-        btn_fullscreen.set_tooltip_text(Some("Fullscreen"));
+        btn_fullscreen.set_tooltip_text(Some(&crate::i18n::tr("Fullscreen")));
         toolbar.append(&btn_fullscreen);
 
         let btn_thumbs = gtk::ToggleButton::new();
@@ -364,7 +364,7 @@ impl Ui {
         toolbar.append(&btn_enhance);
 
         let btn_lens = gtk::ToggleButton::with_label("Lens");
-        btn_lens.set_tooltip_text(Some("Magnifying lens"));
+        btn_lens.set_tooltip_text(Some(&crate::i18n::tr("Magnifying lens")));
         toolbar.append(&btn_lens);
 
         let btn_openwith = gtk::Button::from_icon_name("system-run");
@@ -373,13 +373,13 @@ impl Ui {
 
         let btn_bookmarks = gtk::MenuButton::new();
         btn_bookmarks.set_icon_name("bookmark-new");
-        btn_bookmarks.set_tooltip_text(Some("Bookmarks"));
+        btn_bookmarks.set_tooltip_text(Some(&crate::i18n::tr("Bookmarks")));
         toolbar.append(&btn_bookmarks);
         let bookmarks_popover = gtk::Popover::new();
         btn_bookmarks.set_popover(Some(&bookmarks_popover));
 
         let btn_library = gtk::Button::from_icon_name("folder");
-        btn_library.set_tooltip_text(Some("Library (not ported yet)"));
+        btn_library.set_tooltip_text(Some(&crate::i18n::tr("Library")));
         toolbar.append(&btn_library);
 
         let btn_prefs = gtk::Button::from_icon_name("preferences-system");
@@ -2163,7 +2163,7 @@ impl Ui {
             return;
         }
         let dlg = gtk::Window::new();
-        dlg.set_title(Some("Go to page"));
+        dlg.set_title(Some(&crate::i18n::tr("Go to page")));
         dlg.set_transient_for(Some(&self.window));
         dlg.set_modal(true);
         dlg.set_resizable(false);
@@ -2409,7 +2409,7 @@ impl Ui {
     /// Enhancement dialog: brightness / contrast sliders + auto-contrast.
     pub fn enhance_dialog(&self, rc: Rc<RefCell<Ui>>) {
         let dlg = gtk::Window::new();
-        dlg.set_title(Some("Enhance image"));
+        dlg.set_title(Some(&crate::i18n::tr("Enhance image")));
         dlg.set_transient_for(Some(&self.window));
         dlg.set_modal(true);
         dlg.set_resizable(false);
@@ -2763,7 +2763,7 @@ impl Ui {
         boxv.set_margin_end(6);
         boxv.set_width_request(260);
 
-        let add = gtk::Button::with_label("Add Bookmark");
+        let add = gtk::Button::with_label(&crate::i18n::tr("Add Bookmark"));
         add.set_halign(gtk::Align::Fill);
         {
             let r = rc.clone();
@@ -2773,7 +2773,7 @@ impl Ui {
         }
         boxv.append(&add);
 
-        let edit = gtk::Button::with_label("Edit Bookmarks…");
+        let edit = gtk::Button::with_label(&crate::i18n::tr("Edit Bookmarks…"));
         edit.set_halign(gtk::Align::Fill);
         {
             let r = rc.clone();
@@ -2897,7 +2897,7 @@ impl Ui {
     /// Edit-bookmarks dialog: list with per-row Remove plus Clear all.
     pub fn edit_bookmarks(&mut self, rc: Rc<RefCell<Ui>>) {
         let dlg = gtk::Window::new();
-        dlg.set_title(Some("Bookmarks"));
+        dlg.set_title(Some(&crate::i18n::tr("Bookmarks")));
         dlg.set_transient_for(Some(&self.window));
         dlg.set_modal(true);
         dlg.set_default_size(520, 420);
@@ -2924,7 +2924,7 @@ impl Ui {
             texts.append(&l2);
             row.append(&texts);
 
-            let remove = gtk::Button::with_label("Remove");
+            let remove = gtk::Button::with_label(&crate::i18n::tr("Remove"));
             row.append(&remove);
 
             let row_widget: gtk::Widget = row.upcast();
@@ -2949,8 +2949,8 @@ impl Ui {
         scroller.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Automatic);
         scroller.set_child(Some(&list));
 
-        let clear = gtk::Button::with_label("Clear all");
-        let close = gtk::Button::with_label("Close");
+        let clear = gtk::Button::with_label(&crate::i18n::tr("Clear all"));
+        let close = gtk::Button::with_label(&crate::i18n::tr("Close"));
         let footer = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         footer.set_halign(gtk::Align::End);
         footer.set_margin_top(8);

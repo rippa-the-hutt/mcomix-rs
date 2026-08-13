@@ -6,6 +6,7 @@
 mod app;
 mod archive;
 mod bookmarks;
+mod i18n;
 mod image_loader;
 mod keybindings;
 mod lastread;
@@ -139,6 +140,7 @@ fn build_window(
     prefs: &Prefs,
     args: &Args,
 ) {
+    crate::i18n::init(&prefs.language);
     // CLI view-mode overrides.
     let mut start_fullscreen = args.fullscreen || prefs.default_fullscreen;
     let mut start_slideshow = args.slideshow;

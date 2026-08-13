@@ -132,6 +132,7 @@ pub struct Prefs {
     pub show_osd: bool,
     pub lens_size: u32,
     pub lens_magnification: u32,
+    pub language: String,
 
     // Window geometry
     pub window_x: i32,
@@ -206,6 +207,7 @@ impl Default for Prefs {
             show_osd: true,
             lens_size: 200,
             lens_magnification: 2,
+            language: "auto".to_string(),
             window_x: 0,
             window_y: 0,
             window_width: 1024,

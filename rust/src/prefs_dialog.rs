@@ -89,6 +89,7 @@ fn dropdown(labels: &[&str], selected: u32) -> gtk::DropDown {
 
 struct PrefsForm {
     // Appearance
+    language: gtk::DropDown,
     bg_color: gtk::ColorDialogButton,
     thumb_bg_color: gtk::ColorDialogButton,
     show_page_numbers: gtk::CheckButton,
@@ -126,7 +127,15 @@ struct PrefsForm {
 
 impl PrefsForm {
     fn new(p: &Prefs) -> PrefsForm {
+        let mut lang_labels: Vec<&str> = vec!["Auto (system)"];
+        lang_labels.extend(crate::i18n::available_languages().iter().copied());
+        let lang_idx = crate::i18n::available_languages()
+            .iter()
+            .position(|l| *l == p.language)
+            .map(|i| i + 1)
+            .unwrap_or(0);
         PrefsForm {
+            language: dropdown(&lang_labels, lang_idx as u32),
             bg_color: gtk::ColorDialogButton::new(None),
             thumb_bg_color: gtk::ColorDialogButton::new(None),
             show_page_numbers: check("Show page numbers on thumbnails", p.show_page_numbers_on_thumbnails),
@@ -176,6 +185,12 @@ impl PrefsForm {
         // ---- Appearance ----
         let mut row = 0;
         let grid = page_grid();
+        add_row(
+            &grid,
+            &crate::i18n::tr("Language (needs restart):"),
+            Some(&self.language),
+            &mut row,
+        );
         {
             let btn = &self.bg_color;
             btn.set_rgba(&rgba_from_prefs(&self.bg_color_value()));
@@ -190,7 +205,7 @@ impl PrefsForm {
         page.set_vexpand(true);
         page.set_min_content_height(340);
         let sp = stack.add_named(&page, Some("appearance"));
-        sp.set_title("Appearance");
+        sp.set_title(&crate::i18n::tr("Appearance"));
 
         // ---- Behaviour ----
         let mut row = 0;
@@ -207,7 +222,7 @@ impl PrefsForm {
         page.set_vexpand(true);
         page.set_min_content_height(340);
         let sp = stack.add_named(&page, Some("behaviour"));
-        sp.set_title("Behaviour");
+        sp.set_title(&crate::i18n::tr("Behaviour"));
 
         // ---- Display ----
         let mut row = 0;
@@ -228,7 +243,7 @@ impl PrefsForm {
         page.set_vexpand(true);
         page.set_min_content_height(340);
         let sp = stack.add_named(&page, Some("display"));
-        sp.set_title("Display");
+        sp.set_title(&crate::i18n::tr("Display"));
 
         // ---- Scrolling ----
         let mut row = 0;
@@ -245,7 +260,7 @@ impl PrefsForm {
         page.set_vexpand(true);
         page.set_min_content_height(340);
         let sp = stack.add_named(&page, Some("scrolling"));
-        sp.set_title("Scrolling");
+        sp.set_title(&crate::i18n::tr("Scrolling"));
 
         stack
     }
@@ -256,6 +271,12 @@ impl PrefsForm {
 
     fn collect(&self, base: &Prefs) -> Prefs {
         let mut p = base.clone();
+        let lang_sel = self.language.selected();
+        p.language = if lang_sel == 0 {
+            "auto".to_string()
+        } else {
+            crate::i18n::available_languages()[(lang_sel - 1) as usize].to_string()
+        };
         p.bg_color = prefs_from_rgba(&self.bg_color.rgba());
         p.thumb_bg_color = prefs_from_rgba(&self.thumb_bg_color.rgba());
         p.show_page_numbers_on_thumbnails = self.show_page_numbers.is_active();
@@ -356,7 +377,7 @@ fn build_action_row(
     row.set_margin_start(6);
     row.set_margin_end(6);
 
-    let name = gtk::Label::new(Some(action.label()));
+    let name = gtk::Label::new(Some(&crate::i18n::tr(action.label())));
     name.set_xalign(0.0);
     name.set_hexpand(true);
     row.append(&name);
@@ -438,14 +459,14 @@ pub fn show_dialog(parent: &impl IsA<gtk::Window>, prefs: &Prefs, on_apply: Rc<d
     let stack = form.build_stack();
     let shortcuts = shortcuts_page(parent, bindings);
     let sp = stack.add_named(&shortcuts, Some("shortcuts"));
-    sp.set_title("Shortcuts");
+    sp.set_title(&crate::i18n::tr("Shortcuts"));
     stack.set_visible_child_name("appearance");
 
     let switcher = gtk::StackSwitcher::new();
     switcher.set_stack(Some(&stack));
 
-    let cancel = gtk::Button::with_label("Cancel");
-    let ok = gtk::Button::with_label("OK");
+    let cancel = gtk::Button::with_label(&crate::i18n::tr("Cancel"));
+    let ok = gtk::Button::with_label(&crate::i18n::tr("OK"));
     ok.add_css_class("suggested-action");
 
     let footer = gtk::Box::new(gtk::Orientation::Horizontal, 8);
@@ -464,7 +485,7 @@ pub fn show_dialog(parent: &impl IsA<gtk::Window>, prefs: &Prefs, on_apply: Rc<d
     stack.set_vexpand(true);
 
     let dlg = gtk::Window::new();
-    dlg.set_title(Some("Preferences"));
+    dlg.set_title(Some(&crate::i18n::tr("Preferences")));
     dlg.set_transient_for(Some(parent));
     dlg.set_modal(true);
     dlg.set_default_size(620, 560);
