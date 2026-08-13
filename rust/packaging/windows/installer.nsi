@@ -7,11 +7,16 @@
 
 !define APPNAME "MComix-rs"
 !define BIN "mcomix-rs.exe"
-!define SOURCE_DIR "dist\mcomix-rs-win64"
+!ifndef SOURCE_DIR
+  !define SOURCE_DIR "dist\mcomix-rs-win64"
+!endif
+!ifndef OUTFILE
+  !define OUTFILE "dist\mcomix-rs-setup-${VERSION}.exe"
+!endif
 !define REGKEY "Software\${APPNAME}"
 
 Name "${APPNAME} ${VERSION}"
-OutFile "dist\mcomix-rs-setup-${VERSION}.exe"
+OutFile "${OUTFILE}"
 InstallDir "$PROGRAMFILES64\${APPNAME}"
 InstallDirRegKey HKLM "${REGKEY}" "InstallDir"
 RequestExecutionLevel admin

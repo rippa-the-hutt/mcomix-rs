@@ -44,8 +44,12 @@ gtk4 gdk-pixbuf2 glib2 gettext-runtime libiconv pango cairo harfbuzz
 freetype fontconfig fribidi libpng libjpeg-turbo libtiff jbigkit lerc
 libdeflate libwebp giflib zlib zstd xz bzip2 expat brotli libunistring
 graphite2 libffi pcre2 libxml2 libdatrie libthai libepoxy graphene
-json-glib pixman lzo2 librsvg gcc-libs winpthreads vulkan-loader
+json-glib pixman lzo2 librsvg gcc-libs libwinpthread vulkan-loader
 adwaita-icon-theme iso-codes shared-mime-info
+# GStreamer runtime: libgtk-4-1.dll hard-imports these (media support), so
+# they must be bundled or the app will not start on Windows.
+gstreamer gst-plugins-base gst-plugins-bad-libs orc libogg libvorbis
+libtheora opus libnice gnutls gmp nettle libtasn1 p11-kit libidn2 libva
 "
 
 mkdir -p "$WORK"
@@ -103,12 +107,20 @@ cp "$EXE" "$DIST_DIR/"
 collect_deps() { # exe -> list of DLL names (first level)
     x86_64-w64-mingw32-objdump -p "$1" | awk '/DLL Name:/{print $3}'
 }
+# Windows system DLLs are provided by the OS and must NOT be bundled.
+is_system_dll() {
+    case "$(printf '%s' "$1" | tr 'A-Z' 'a-z')" in
+        kernel32.dll|user32.dll|gdi32.dll|advapi32.dll|shell32.dll|ole32.dll|oleaut32.dll|shlwapi.dll|ws2_32.dll|comdlg32.dll|comctl32.dll|crypt32.dll|d3d11.dll|d3d12.dll|dcomp.dll|dwmapi.dll|hid.dll|imm32.dll|opengl32.dll|setupapi.dll|shcore.dll|winmm.dll|winspool.drv|msimg32.dll|dwrite.dll|rpcrt4.dll|usp10.dll|dxgi.dll|cfgmgr32.dll|ntdll.dll|msvcrt.dll|dnsapi.dll|iphlpapi.dll|gdiplus.dll|uxtheme.dll|version.dll|bcrypt.dll|bcryptprimitives.dll|api-ms-win-*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
 copied=""
 copy_dll() { # name
     local dll="$1"
     if echo "$copied" | grep -qx "$dll"; then return; fi
     copied="$copied
 $dll"
+    if is_system_dll "$dll"; then return; fi
     local src="$MINGW/bin/$dll"
     if [ ! -f "$src" ]; then
         echo "WARNING: $dll not found in sysroot"
@@ -153,7 +165,11 @@ echo "==> Creating portable zip"
 (cd dist && rm -f "$(basename "$PORTABLE")" && zip -qr "$(basename "$PORTABLE")" mcomix-rs-win64)
 
 echo "==> Building NSIS installer (makensis on Linux)"
-makensis -DVERSION="$VERSION" packaging/windows/installer.nsi
+makensis \
+    -DVERSION="$VERSION" \
+    -DSOURCE_DIR="$ROOT/dist/mcomix-rs-win64" \
+    -DOUTFILE="$ROOT/dist/mcomix-rs-setup-${VERSION}.exe" \
+    packaging/windows/installer.nsi
 
 echo "==> Done."
 ls -lh "$PORTABLE" "$SETUP"
