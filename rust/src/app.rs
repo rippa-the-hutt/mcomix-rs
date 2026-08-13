@@ -1251,13 +1251,14 @@ impl Ui {
     /// Progressive toolbar overflow with hysteresis: hide least-used buttons
     /// (into the "more" menu) until the toolbar fits; restore them when there
     /// is clearly enough room. All hidden buttons stay reachable via the menu.
+    /// Deterministic toolbar overflow: compute exactly how many buttons must
+    /// collapse so the visible toolbar fits `alloc`. Based on stable stored
+    /// widths (refreshed while fully expanded) + small engage/disengage
+    /// margins, so there is no feedback oscillation.
     pub fn update_toolbar_overflow(&mut self) {
-        const MARGIN: i32 = 48;
+        const ENGAGE: i32 = 24; // collapse once alloc <= full - ENGAGE
+        const DISENGAGE: i32 = 24; // restore fully once alloc >= full + DISENGAGE
         let alloc = self.toolbar.allocation().width();
-        let full = self.toolbar_natural.unwrap_or_else(|| {
-            let (_, natural, _, _) = self.toolbar.measure(gtk::Orientation::Horizontal, -1);
-            natural
-        });
         if self.hidden_count == 0 {
             // Fully expanded: refresh the reference widths (widgets may not
             // have been realized when the collapsible list was built).
@@ -1267,24 +1268,38 @@ impl Ui {
             for (_, b, w) in self.collapsible.iter_mut() {
                 *w = b.measure(gtk::Orientation::Horizontal, -1).1;
             }
-            if alloc < natural - MARGIN {
-                self.set_toolbar_hidden(1);
+            if alloc >= natural - ENGAGE {
+                return; // fits (or in the neutral band)
             }
+            self.set_toolbar_hidden(self.fit_hidden(alloc).max(1));
             return;
         }
-        // Some buttons hidden: estimate the visible natural width.
-        let hidden_sum: i32 = self
-            .collapsible
-            .iter()
-            .take(self.hidden_count)
-            .map(|(_, _, w)| *w)
-            .sum();
-        let visible = full - hidden_sum + self.more_natural;
-        if alloc < visible - MARGIN && self.hidden_count < self.collapsible.len() {
-            self.set_toolbar_hidden(self.hidden_count + 1);
-        } else if alloc >= visible + MARGIN && self.hidden_count > 0 {
-            self.set_toolbar_hidden(self.hidden_count - 1);
+        let full = self.toolbar_natural.unwrap_or_else(|| {
+            let (_, n, _, _) = self.toolbar.measure(gtk::Orientation::Horizontal, -1);
+            n
+        });
+        if alloc >= full + DISENGAGE {
+            self.set_toolbar_hidden(0);
+        } else if alloc <= full - ENGAGE {
+            self.set_toolbar_hidden(self.fit_hidden(alloc).max(1));
         }
+        // Within the neutral band: keep the current state.
+    }
+
+    /// Largest k such that hiding the first k collapsible buttons leaves a
+    /// visible toolbar that fits `alloc` (0 = even fully expanded fits).
+    fn fit_hidden(&self, alloc: i32) -> usize {
+        let full = self.toolbar_natural.unwrap_or(0);
+        let mut best = 0usize;
+        let mut hidden_sum: i32 = 0;
+        for (k, (_, _, w)) in self.collapsible.iter().enumerate() {
+            hidden_sum += *w;
+            let visible = full - hidden_sum + self.more_natural;
+            if visible <= alloc + 2 {
+                best = k + 1;
+            }
+        }
+        best
     }
 
     // ================= file handling =================
