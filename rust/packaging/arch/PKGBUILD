@@ -18,7 +18,7 @@ depends=(
     'glib2'
     'pango'
     'cairo'
-    'liblzma'
+    'xz'
     'bzip2'
 )
 optdepends=(
