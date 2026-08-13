@@ -1,0 +1,12 @@
+[Desktop Entry]
+Version=1.0
+Name=MComix-rs
+GenericName=Comic Book Viewer
+Comment=A viewer for comic book archives
+Exec=mcomix-rs %f
+Icon=mcomix3
+Terminal=false
+Type=Application
+Categories=Graphics;Viewer;
+MimeType=application/x-cbz;application/x-cbr;application/x-cbt;application/x-cb7;application/pdf;application/zip;application/x-rar;application/x-tar;application/x-7z-compressed;image/jpeg;image/png;image/gif;image/webp;image/bmp;image/tiff;
+StartupNotify=true

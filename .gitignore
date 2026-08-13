@@ -1,0 +1,20 @@
+# --- Python (MComix3) ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+*.deb
+release/
+
+# --- Rust port (mcomix-rs) ---
+/rust/target/
+/rust/dist/
+
+# --- Tooling / OS ---
+.codexresume
+.agents/
+.codex/
+*.swp
+*~
+.DS_Store

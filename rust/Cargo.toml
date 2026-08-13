@@ -1,0 +1,56 @@
+[package]
+name = "mcomix-rs"
+version = "0.1.0"
+edition = "2021"
+description = "A user-friendly, customizable comic book image viewer (Rust port of MComix3)"
+license = "GPL-2.0-or-later"
+homepage = "https://github.com/rippa-the-hutt/mcomix-rs"
+repository = "https://github.com/rippa-the-hutt/mcomix-rs"
+
+[[bin]]
+name = "mcomix-rs"
+path = "src/main.rs"
+
+[dependencies]
+gtk4 = { version = "0.9", features = ["v4_12"] }
+gdk-pixbuf = "0.20"
+gio = "0.20"
+glib = "0.20"
+image = { version = "0.25", default-features = false, features = [
+    "png", "jpeg", "gif", "webp", "bmp", "tiff", "ico", "qoi", "pnm", "tga",
+] }
+zip = { version = "2", default-features = false, features = ["deflate", "bzip2", "zstd"] }
+sevenz-rust = "0.6"
+tar = "0.4"
+flate2 = "1"
+bzip2 = "0.4"
+xz2 = "0.1"
+serde = { version = "1", features = ["derive"] }
+rusqlite = { version = "0.31", features = ["bundled"] }
+serde_json = "1"
+toml = "0.8"
+directories = "5"
+clap = { version = "4", features = ["derive"] }
+log = "0.4"
+env_logger = "0.11"
+
+[profile.release]
+lto = true
+strip = true
+codegen-units = 1
+
+# Packaging metadata for `cargo deb` (Debian/Ubuntu .deb builds).
+[package.metadata.deb]
+maintainer = "Rippa The Hutt <iacoporippagmail@duck.com>"
+copyright = "2026 Rippa The Hutt"
+license-file = "../COPYING"
+section = "graphics"
+priority = "optional"
+depends = "$auto, libgtk-4-1, libgdk-pixbuf-2.0-0, libglib2.0-0, libpango-1.0-0, libcairo2, liblzma5, libbz2-1.0"
+recommends = "unrar, p7zip-full, mupdf-tools"
+assets = [
+    ["target/release/mcomix-rs", "usr/bin/", "755"],
+    ["packaging/linux/mcomix-rs.desktop", "usr/share/applications/", "644"],
+    ["packaging/linux/mcomix-rs.xml", "usr/share/mime/packages/", "644"],
+    ["packaging/linux/icons/**/*.png", "usr/share/icons/hicolor/", "644"],
+]

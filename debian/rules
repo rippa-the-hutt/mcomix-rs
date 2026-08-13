@@ -1,0 +1,14 @@
+#!/usr/bin/make -f
+
+%:
+	dh $@ --with python3 --buildsystem=pybuild
+
+override_dh_auto_test:
+
+override_dh_fixperms:
+	dh_fixperms
+	chmod 755 debian/mcomix3/usr/share/mcomix3/mcomixstarter.py
+
+override_dh_clean:
+	dh_clean
+	rm -rf *.egg-info

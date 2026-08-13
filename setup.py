@@ -1,0 +1,111 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+""" MComix installation routines.
+
+Example usage:
+    Normal installation (all files are copied into a directory in python/lib/site-packages/mcomix)
+    $ ./setup.py install
+
+    For distribution packaging (All files are installed relative to /tmp/mcomix)
+    $ ./setup.py install --single-version-externally-managed --root /tmp/mcomix --prefix /usr
+"""
+
+import os
+import glob
+import setuptools
+
+from mcomix import constants
+
+def get_data_patterns(directory, *patterns):
+    """ Build a list of patterns for all subdirectories of <directory>
+    to be passed into package_data. """
+
+    olddir = os.getcwd()
+    os.chdir(os.path.join(constants.BASE_PATH, directory))
+    allfiles = []
+    for dirpath, subdirs, files in os.walk("."):
+        for pattern in patterns:
+            current_pattern = os.path.normpath(os.path.join(dirpath, pattern))
+            if glob.glob(current_pattern):
+                # Forward slashes only for distutils.
+                allfiles.append(current_pattern.replace('\\', '/'))
+    os.chdir(olddir)
+    return allfiles
+
+# Collect image files for package_data. Replace wildcard pattern with actual files.
+images = get_data_patterns('mcomix/images', '*.png')
+images.remove('*.png')
+images.extend([ os.path.basename(img)
+    for img in glob.glob(os.path.join(constants.BASE_PATH, 'mcomix/images', '*.png'))
+    ])
+
+setuptools.setup(
+    name = constants.APPNAME.lower(),
+    version = constants.VERSION,
+    packages = ['mcomix', 'mcomix.archive', 'mcomix.library',
+        'mcomix.messages', 'mcomix.images', 'mcomix.win32'],
+    package_data = {
+        'mcomix.messages' : get_data_patterns('mcomix/messages', '*.mo'),
+        'mcomix.images' : images },
+    entry_points = {
+        'console_scripts' : [ 'mcomix3 = mcomix.run:run' ],
+    },
+    test_suite = "test",
+    requires = ['pygtk (>=2.12.0)', 'PIL (>=1.15)'],
+    install_requires = ['setuptools'],
+    zip_safe = False,
+
+    # Various MIME files that need to be copied to certain system locations on Linux.
+    # Note that these files are only installed correctly if
+    # --single-version-externally-managed is used as argument to "setup.py install".
+    # Otherwise, these files end up in a MComix egg directory in site-packages.
+    # (Thank you, setuptools!)
+    data_files = [
+        ('share/man/man1', ['mcomix.1.gz']),
+        ('share/applications', ['mime/mcomix.desktop']),
+        ('share/appdata', ['mime/mcomix.appdata.xml']),
+        ('share/mime/packages', ['mime/mcomix.xml']),
+        ('share/icons/hicolor/16x16/apps', ['mcomix/images/16x16/mcomix3.png']),
+        ('share/icons/hicolor/22x22/apps', ['mcomix/images/22x22/mcomix3.png']),
+        ('share/icons/hicolor/24x24/apps', ['mcomix/images/24x24/mcomix3.png']),
+        ('share/icons/hicolor/32x32/apps', ['mcomix/images/32x32/mcomix3.png']),
+        ('share/icons/hicolor/48x48/apps', ['mcomix/images/48x48/mcomix3.png']),
+        ('share/icons/hicolor/256x256/apps', ['mcomix/images/256x256/mcomix3.png']),
+        ('share/icons/hicolor/16x16/mimetypes',
+            ['mime/icons/16x16/application-x-cbz.png',
+             'mime/icons/16x16/application-x-cbr.png',
+             'mime/icons/16x16/application-x-cbt.png']),
+        ('share/icons/hicolor/22x22/mimetypes',
+            ['mime/icons/22x22/application-x-cbz.png',
+             'mime/icons/22x22/application-x-cbr.png',
+             'mime/icons/22x22/application-x-cbt.png']),
+        ('share/icons/hicolor/24x24/mimetypes',
+            ['mime/icons/24x24/application-x-cbz.png',
+             'mime/icons/24x24/application-x-cbr.png',
+             'mime/icons/24x24/application-x-cbt.png']),
+        ('share/icons/hicolor/32x32/mimetypes',
+            ['mime/icons/32x32/application-x-cbz.png',
+             'mime/icons/32x32/application-x-cbr.png',
+             'mime/icons/32x32/application-x-cbt.png']),
+        ('share/icons/hicolor/48x48/mimetypes',
+            ['mime/icons/48x48/application-x-cbz.png',
+             'mime/icons/48x48/application-x-cbr.png',
+             'mime/icons/48x48/application-x-cbt.png'])],
+
+    # Package metadata
+    maintainer = 'Rippa The Hutt',
+    maintainer_email = '',
+    url = 'https://github.com/rippa-the-hutt/mcomix3',
+    description = 'GTK3 comic book viewer (Python 3 port)',
+    long_description = 'MComix3 is a user-friendly, customizable image viewer. '
+        'It is specifically designed to handle comic books (both Western comics and manga) '
+        'and supports a variety of container formats (including CBR, CBZ, CB7, CBT, LHA and PDF). '
+        'MComix3 is a fork of MComix, ported to Python 3 and GTK3.',
+    license = "License :: OSI Approved :: GNU General Public License (GPL)",
+    platforms = ['Operating System :: POSIX :: Linux',
+        'Operating System :: Microsoft :: Windows',
+        'Operating System :: POSIX :: BSD'],
+)
+
+# vim: expandtab:sw=4:ts=4
