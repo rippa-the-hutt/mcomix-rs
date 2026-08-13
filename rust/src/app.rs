@@ -263,11 +263,15 @@ pub struct Ui {
     /// "More" overflow button shown when the toolbar is too narrow.
     pub more_btn: gtk::MenuButton,
     pub more_popover: gtk::Popover,
-    /// Secondary buttons that collapse into the overflow menu.
-    pub overflow_buttons: Vec<(String, gtk::Button)>,
-    /// Natural width of the fully-expanded toolbar (stable reference for the
-    /// overflow decision, avoids feedback oscillation).
+    /// Buttons that can collapse into the overflow menu, in priority order
+    /// (index 0 hides first = least used), with their natural widths.
+    pub collapsible: Vec<(String, gtk::Button, i32)>,
+    /// How many leading buttons of `collapsible` are currently hidden.
+    pub hidden_count: usize,
+    /// Natural width of the fully-expanded toolbar (stable reference).
     pub toolbar_natural: Option<i32>,
+    /// Natural width of the "more" button (added when visible).
+    pub more_natural: i32,
     pub bookmarks_popover: gtk::Popover,
     /// On-screen display (page info, auto-hides).
     pub osd: gtk::Label,
@@ -416,14 +420,32 @@ impl Ui {
         btn_prefs.set_tooltip_text(Some(&crate::i18n::tr("Preferences")));
         toolbar.append(&btn_prefs);
 
-        let overflow_buttons: Vec<(String, gtk::Button)> = vec![
+        // All Button-type toolbar controls that may collapse into the
+        // overflow menu, least-used first. Open/prev/next, the zoom dropdown,
+        // the bookmarks menu button and the more button always stay visible.
+        let collapsible: Vec<(String, gtk::Button, i32)> = vec![
+            (crate::i18n::tr("About"), btn_about.clone().upcast::<gtk::Button>()),
+            (crate::i18n::tr("Preferences"), btn_prefs.clone().upcast::<gtk::Button>()),
+            (crate::i18n::tr("Library"), btn_library.clone().upcast::<gtk::Button>()),
+            (crate::i18n::tr("Open with…"), btn_openwith.clone().upcast::<gtk::Button>()),
             (crate::i18n::tr("Enhance image"), btn_enhance.clone().upcast::<gtk::Button>()),
             (crate::i18n::tr("Magnifying lens"), btn_lens.clone().upcast::<gtk::Button>()),
-            (crate::i18n::tr("Open with…"), btn_openwith.clone().upcast::<gtk::Button>()),
-            (crate::i18n::tr("Library"), btn_library.clone().upcast::<gtk::Button>()),
-            (crate::i18n::tr("Preferences"), btn_prefs.clone().upcast::<gtk::Button>()),
-            (crate::i18n::tr("About"), btn_about.clone().upcast::<gtk::Button>()),
-        ];
+            (crate::i18n::tr("Rotate 90° clockwise"), btn_rotate.clone().upcast::<gtk::Button>()),
+            (crate::i18n::tr("Normal size"), btn_zoom_orig.clone().upcast::<gtk::Button>()),
+            (crate::i18n::tr("Zoom out"), btn_zoom_out.clone().upcast::<gtk::Button>()),
+            (crate::i18n::tr("Zoom in"), btn_zoom_in.clone().upcast::<gtk::Button>()),
+            (crate::i18n::tr("Slideshow"), btn_slideshow.clone().upcast::<gtk::Button>()),
+            (crate::i18n::tr("Fullscreen"), btn_fullscreen.clone().upcast::<gtk::Button>()),
+            (crate::i18n::tr("Thumbnails"), btn_thumbs.clone().upcast::<gtk::Button>()),
+            (crate::i18n::tr("Double page mode"), btn_double.clone().upcast::<gtk::Button>()),
+            (crate::i18n::tr("Manga"), btn_manga.clone().upcast::<gtk::Button>()),
+        ]
+        .into_iter()
+        .map(|(label, b)| {
+            let (_, natural, _, _) = b.measure(gtk::Orientation::Horizontal, -1);
+            (label, b, natural)
+        })
+        .collect();
 
         // Clicking toolbar buttons must not move keyboard focus away from the
         // viewer (so arrow/Page keys keep working after mouse usage).
@@ -564,8 +586,10 @@ impl Ui {
             bookmarks_popover,
             more_btn,
             more_popover,
-            overflow_buttons,
+            collapsible: Vec::new(),
+            hidden_count: 0,
             toolbar_natural: None,
+            more_natural: 0,
             osd,
             osd_source: None,
             osd_fired: Rc::new(std::cell::Cell::new(false)),
@@ -1173,8 +1197,8 @@ impl Ui {
         });
     }
 
-    /// Build the overflow menu rows (each row clicks its underlying button,
-    /// so handlers stay in one place).
+    /// Build the overflow menu rows for the currently hidden buttons (each
+    /// row clicks its underlying button, so handlers stay in one place).
     pub fn rebuild_more_popover(&mut self) {
         let boxv = gtk::Box::new(gtk::Orientation::Vertical, 2);
         boxv.set_width_request(200);
@@ -1182,7 +1206,11 @@ impl Ui {
         boxv.set_margin_bottom(6);
         boxv.set_margin_start(6);
         boxv.set_margin_end(6);
-        let items = self.overflow_buttons.clone();
+        let items: Vec<(String, gtk::Button)> = self.collapsible
+            .iter()
+            .take(self.hidden_count)
+            .map(|(l, b, _)| (l.clone(), b.clone()))
+            .collect();
         for (label, btn) in &items {
             let row = gtk::Button::with_label(label);
             row.set_halign(gtk::Align::Fill);
@@ -1196,39 +1224,53 @@ impl Ui {
         self.more_btn.set_popover(Some(&self.more_popover));
     }
 
-    /// When the toolbar cannot fit, hide the secondary buttons and show the
-    /// overflow menu (and vice versa).
-    ///
-    /// Uses hysteresis: the decision is made against the stable natural width
-    /// of the fully-expanded toolbar with a margin, so hiding/showing the
-    /// buttons cannot feed back and oscillate.
+    /// Hide/show `n` leading buttons and refresh the overflow menu.
+    fn set_toolbar_hidden(&mut self, n: usize) {
+        let n = n.min(self.collapsible.len());
+        if n == self.hidden_count {
+            return;
+        }
+        self.hidden_count = n;
+        for (i, (_, b, _)) in self.collapsible.iter().enumerate() {
+            b.set_visible(i >= n);
+        }
+        self.more_btn.set_visible(n > 0);
+        self.rebuild_more_popover();
+    }
+
+    /// Progressive toolbar overflow with hysteresis: hide least-used buttons
+    /// (into the "more" menu) until the toolbar fits; restore them when there
+    /// is clearly enough room. All hidden buttons stay reachable via the menu.
     pub fn update_toolbar_overflow(&mut self) {
         const MARGIN: i32 = 48;
         let alloc = self.toolbar.allocation().width();
-        let (_, natural, _, _) = self.toolbar.measure(gtk::Orientation::Horizontal, -1);
-
-        if self.more_btn.is_visible() {
-            // Overflow active: stay collapsed unless there is clearly enough
-            // room again (compared to the last full-width measurement).
-            let full = self.toolbar_natural.unwrap_or(natural);
-            if alloc >= full + MARGIN {
-                self.set_toolbar_overflow(false);
-            }
-        } else {
-            // Fully expanded: keep the reference width fresh, collapse only
-            // when clearly too narrow.
+        let full = self.toolbar_natural.unwrap_or_else(|| {
+            let (_, natural, _, _) = self.toolbar.measure(gtk::Orientation::Horizontal, -1);
+            natural
+        });
+        if self.hidden_count == 0 {
+            // Fully expanded: keep the reference fresh.
+            let (_, natural, _, _) = self.toolbar.measure(gtk::Orientation::Horizontal, -1);
             self.toolbar_natural = Some(natural);
+            self.more_natural = self.more_btn.measure(gtk::Orientation::Horizontal, -1).1;
             if alloc < natural - MARGIN {
-                self.set_toolbar_overflow(true);
+                self.set_toolbar_hidden(1);
             }
+            return;
         }
-    }
-
-    fn set_toolbar_overflow(&mut self, overflow: bool) {
-        for (_, b) in &self.overflow_buttons {
-            b.set_visible(!overflow);
+        // Some buttons hidden: estimate the visible natural width.
+        let hidden_sum: i32 = self
+            .collapsible
+            .iter()
+            .take(self.hidden_count)
+            .map(|(_, _, w)| *w)
+            .sum();
+        let visible = full - hidden_sum + self.more_natural;
+        if alloc < visible - MARGIN && self.hidden_count < self.collapsible.len() {
+            self.set_toolbar_hidden(self.hidden_count + 1);
+        } else if alloc >= visible + MARGIN && self.hidden_count > 0 {
+            self.set_toolbar_hidden(self.hidden_count - 1);
         }
-        self.more_btn.set_visible(overflow);
     }
 
     // ================= file handling =================
