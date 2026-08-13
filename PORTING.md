@@ -44,7 +44,7 @@ rust/
 | `archive/sevenzip_external.py` | `archive/sevenzip.rs` | ✅ done (external `7z` first, pure-Rust `sevenz-rust` fallback) |
 | `archive/rar_external.py` | `archive/rar.rs` | ✅ done (external unrar/7z) |
 | `archive/lha_external.py` | `archive/lha.rs` | ✅ done (external 7z, `lha` fallback) |
-| `archive/pdf_external.py` | `archive/pdf.rs` | ✅ done (mutool; fixed 216 DPI) |
+| `archive/pdf_external.py` | `archive/pdf.rs` | ✅ done (mutool; per-page optimal DPI via trace pass) |
 | `archive_recursive.py` (archive-in-archive) | — | ⏳ deferred |
 | `image_handler.py` (cache, prefetch) | `app.rs` + `lru.rs` | ✅ LRU page cache (`max pages to cache`) + background prefetch |
 | `image_tools.py` | `image_loader.rs` | ✅ core; enhancers ⏳ |
@@ -124,9 +124,8 @@ Windows notes:
 
 ## What's next (suggested order)
 
-1. **PDF polish**: port the optimal-DPI trace pass from `pdf_external.py`.
-2. **Full smart-scroll layout engine** (port `layout.py`/`scrolling.py` box model).
-3. **i18n coverage** — wrap the remaining UI strings in `tr()` (status bar,
+1. **Full smart-scroll layout engine** (port `layout.py`/`scrolling.py` box model).
+2. **i18n coverage** — wrap the remaining UI strings in `tr()` (status bar,
    OSD, dialogs) so all languages see translations.
 4. **macOS packaging** — very last step (no Mac available to the
    maintainer). The codebase is portable (gtk4-rs works on macOS via
