@@ -102,6 +102,7 @@ modes, `+`/`-` zoom, `r`/`Shift+r` rotate, `f`/`F11` fullscreen, `i` hide all,
 | Debian/Ubuntu `.deb` | `rust/` + `rust/debian/` | `cargo install cargo-deb && cargo deb` (needs GTK ≥ 4.12 ⇒ Debian 13+/Ubuntu 24.04+) |
 | Arch Linux | `rust/packaging/arch/PKGBUILD` | `makepkg -si` (drop into a dir with the source) |
 | Standalone Linux | tarball job in CI | binary only; needs GTK runtime installed |
+| AppImage | `packaging/appimage/build-appimage.sh` | linuxdeploy + GTK plugin + appimagetool (CI job) |
 | Windows portable zip | `rust/packaging/windows/msys2-build.sh` | MSYS2 MINGW64 build; bundles GTK DLLs + data ⇒ no-install folder/zip |
 | Windows NSIS installer | `installer.nsi` | produced by the same script ⇒ `mcomix-rs-setup-<ver>.exe` |
 | GitHub Releases | `.github/workflows/release.yml` | tag `v0.1.0` ⇒ builds .deb, tarball, zip, installer; attaches to a draft release |
@@ -123,8 +124,7 @@ Windows notes:
 
 ## What's next (suggested order)
 
-1. **AppImage** for a truly standalone Linux distribution.
-2. **PDF polish**: port the optimal-DPI trace pass from `pdf_external.py`.
-3. **Full smart-scroll layout engine** (port `layout.py`/`scrolling.py` box model).
-4. **i18n coverage** — wrap the remaining UI strings in `tr()` (status bar,
+1. **PDF polish**: port the optimal-DPI trace pass from `pdf_external.py`.
+2. **Full smart-scroll layout engine** (port `layout.py`/`scrolling.py` box model).
+3. **i18n coverage** — wrap the remaining UI strings in `tr()` (status bar,
    OSD, dialogs) so all languages see translations.
