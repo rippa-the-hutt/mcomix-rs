@@ -1,15 +1,14 @@
-# --- Python (MComix3) ---
-__pycache__/
-*.py[cod]
-*.egg-info/
-build/
-dist/
-*.deb
-release/
-
 # --- Rust port (mcomix-rs) ---
 /rust/target/
 /rust/dist/
+
+# --- Arch package build artifacts ---
+/rust/packaging/arch/*.pkg.tar.zst
+/rust/packaging/arch/*.pkg.tar.zst.sig
+/rust/packaging/arch/*-package.log
+/rust/packaging/arch/*.tar.gz
+/rust/packaging/arch/src/
+/rust/packaging/arch/pkg/
 
 # --- Tooling / OS ---
 .codexresume
@@ -18,10 +17,3 @@ release/
 *.swp
 *~
 .DS_Store
-# Arch package build artifacts
-/rust/packaging/arch/*.pkg.tar.zst
-/rust/packaging/arch/*.pkg.tar.zst.sig
-/rust/packaging/arch/*-package.log
-/rust/packaging/arch/src/
-/rust/packaging/arch/pkg/
-/rust/packaging/arch/*.tar.gz
