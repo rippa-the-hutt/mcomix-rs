@@ -128,3 +128,9 @@ Windows notes:
 2. **Full smart-scroll layout engine** (port `layout.py`/`scrolling.py` box model).
 3. **i18n coverage** — wrap the remaining UI strings in `tr()` (status bar,
    OSD, dialogs) so all languages see translations.
+4. **macOS packaging** — very last step (no Mac available to the
+   maintainer). The codebase is portable (gtk4-rs works on macOS via
+   Homebrew's gtk4); would need a macOS build target, a `.app` bundle
+   (+ optionally DMG), and notarization for Gatekeeper-friendly
+   distribution. The Linux tarball binary does NOT run on macOS (ELF vs
+   Mach-O, different system libraries).
