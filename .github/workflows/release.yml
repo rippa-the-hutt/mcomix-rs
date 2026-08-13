@@ -75,7 +75,7 @@ jobs:
           path: rust/dist/*.AppImage
 
   windows-cross:
-    name: Windows (cross-compiled from Linux: zip + NSIS installer)
+    name: Windows (cross-compiled from Linux)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
