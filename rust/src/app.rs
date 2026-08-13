@@ -265,6 +265,9 @@ pub struct Ui {
     pub more_popover: gtk::Popover,
     /// Secondary buttons that collapse into the overflow menu.
     pub overflow_buttons: Vec<(String, gtk::Button)>,
+    /// Natural width of the fully-expanded toolbar (stable reference for the
+    /// overflow decision, avoids feedback oscillation).
+    pub toolbar_natural: Option<i32>,
     pub bookmarks_popover: gtk::Popover,
     /// On-screen display (page info, auto-hides).
     pub osd: gtk::Label,
@@ -562,6 +565,7 @@ impl Ui {
             more_btn,
             more_popover,
             overflow_buttons,
+            toolbar_natural: None,
             osd,
             osd_source: None,
             osd_fired: Rc::new(std::cell::Cell::new(false)),
@@ -1194,16 +1198,37 @@ impl Ui {
 
     /// When the toolbar cannot fit, hide the secondary buttons and show the
     /// overflow menu (and vice versa).
+    ///
+    /// Uses hysteresis: the decision is made against the stable natural width
+    /// of the fully-expanded toolbar with a margin, so hiding/showing the
+    /// buttons cannot feed back and oscillate.
     pub fn update_toolbar_overflow(&mut self) {
+        const MARGIN: i32 = 48;
         let alloc = self.toolbar.allocation().width();
         let (_, natural, _, _) = self.toolbar.measure(gtk::Orientation::Horizontal, -1);
-        let overflow = alloc < natural;
-        if overflow != self.more_btn.is_visible() {
-            for (_, b) in &self.overflow_buttons {
-                b.set_visible(!overflow);
+
+        if self.more_btn.is_visible() {
+            // Overflow active: stay collapsed unless there is clearly enough
+            // room again (compared to the last full-width measurement).
+            let full = self.toolbar_natural.unwrap_or(natural);
+            if alloc >= full + MARGIN {
+                self.set_toolbar_overflow(false);
             }
-            self.more_btn.set_visible(overflow);
+        } else {
+            // Fully expanded: keep the reference width fresh, collapse only
+            // when clearly too narrow.
+            self.toolbar_natural = Some(natural);
+            if alloc < natural - MARGIN {
+                self.set_toolbar_overflow(true);
+            }
         }
+    }
+
+    fn set_toolbar_overflow(&mut self, overflow: bool) {
+        for (_, b) in &self.overflow_buttons {
+            b.set_visible(!overflow);
+        }
+        self.more_btn.set_visible(overflow);
     }
 
     // ================= file handling =================
