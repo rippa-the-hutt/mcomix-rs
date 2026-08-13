@@ -64,7 +64,7 @@ rust/
 | `openwith.py` | `app.rs` | ✅ Open-with dialog + remembered commands |
 | `archive_packer.py` (edit archive) | — | ⏳ later (`zip` write support) |
 | `edit_*.py` (image editing) | — | ⏳ later |
-| i18n (`messages/*.po`) | — | ⏳ later (gettext-rs or fluent) |
+| i18n (`messages/*.mo`) | `i18n.rs` + `build.rs` | ✅ embedded .mo catalogs (23 languages), language pref + dropdown; UI coverage incremental |
 
 ## Build & run
 
@@ -123,8 +123,10 @@ Windows notes:
 
 ## What's next (suggested order)
 
-1. **Recursive archives** (archives inside archives).
-3. **i18n** (reuse the existing `.po` files via gettext-rs).
-5. **AppImage** for a truly standalone Linux distribution.
+1. **AppImage** for a truly standalone Linux distribution.
+2. **PDF polish**: port the optimal-DPI trace pass from `pdf_external.py`.
+3. **Full smart-scroll layout engine** (port `layout.py`/`scrolling.py` box model).
+4. **i18n coverage** — wrap the remaining UI strings in `tr()` (status bar,
+   OSD, dialogs) so all languages see translations.
 6. **PDF polish**: port the optimal-DPI trace pass from `pdf_external.py`.
 7. **Full smart-scroll layout engine** (port `layout.py`/`scrolling.py` box model).
