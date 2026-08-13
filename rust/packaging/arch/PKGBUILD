@@ -27,6 +27,7 @@ optdepends=(
     'mupdf-tools: for PDF support'
 )
 makedepends=(
+    'git'
     'rust'
     'pkg-config'
     'desktop-file-utils'
