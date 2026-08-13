@@ -1108,6 +1108,24 @@ impl Ui {
         }
         self.scrolled.add_controller(motion);
 
+        // ---- drag & drop: open dropped files/directories ----
+        let dt = gtk::DropTarget::new(gio::File::static_type(), gdk::DragAction::COPY);
+        let r_drop = rc.clone();
+        dt.connect_drop(move |_dt, value, _x, _y| {
+            match value.get::<gio::File>() {
+                Ok(file) => {
+                    if let Some(p) = file.path() {
+                        log::info!("drop: {}", p.display());
+                        r_drop.borrow_mut().open_path(p, r_drop.clone());
+                        return true;
+                    }
+                }
+                Err(e) => log::debug!("drop: not a file: {e}"),
+            }
+            false
+        });
+        self.window.add_controller(dt);
+
         // ---- save on close ----
         self.window.connect_close_request({
             let r = rc.clone();
@@ -1267,6 +1285,35 @@ impl Ui {
     }
 
     pub fn open_path_with_page(&mut self, path: PathBuf, start_page: u32) {
+        // A single image file: open its parent directory as the book and jump
+        // to the file's position (mirrors MComix, which shows the image and
+        // allows navigating through the directory's other images).
+        if path.is_file() && crate::archive::is_image_file(&path.to_string_lossy()) {
+            if let Some(dir) = path.parent() {
+                let mut files: Vec<PathBuf> = Vec::new();
+                if let Ok(rd) = std::fs::read_dir(dir) {
+                    for e in rd.flatten() {
+                        let p = e.path();
+                        if p.is_file() && crate::archive::is_image_file(&p.to_string_lossy()) {
+                            files.push(p);
+                        }
+                    }
+                }
+                let mut names: Vec<String> = files
+                    .iter()
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .collect();
+                crate::natsort::natural_sort(&mut names);
+                if let Some(idx) = names
+                    .iter()
+                    .position(|n| Path::new(n) == &path)
+                {
+                    self.open_path_with_page(dir.to_path_buf(), (idx + 1) as u32);
+                    return;
+                }
+            }
+        }
+
         if let Some(mut a) = self.state.archive.take() {
             a.close();
         }
