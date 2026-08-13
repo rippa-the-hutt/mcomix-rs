@@ -740,7 +740,9 @@ impl Ui {
             });
         }
 
-        // Initial file.
+        // Initial file. Generic opens (file manager, CLI without an explicit
+        // page, auto-load) go through the resume prompt; explicit CLI pages
+        // open directly.
         {
             let mut u = ui.borrow_mut();
             let prefs = u.state.prefs.clone();
@@ -757,12 +759,13 @@ impl Ui {
                 }
             });
             if let Some(p) = path {
-                let page = if prefs.auto_load_last_file {
-                    prefs.page_of_last_file
+                if start_page > 1 {
+                    u.open_path_with_page(p, start_page);
+                } else if prefs.auto_load_last_file {
+                    u.open_path_with_page(p, prefs.page_of_last_file);
                 } else {
-                    start_page.max(1)
-                };
-                u.open_path_with_page(p, page);
+                    u.open_path(p, ui.clone());
+                }
             } else {
                 u.redraw();
             }
@@ -1126,24 +1129,24 @@ impl Ui {
     }
 
     pub fn open_path(&mut self, path: PathBuf, rc: Rc<RefCell<Ui>>) {
-        let same = self.state.prefs.path_to_last_file == path.to_string_lossy();
-        let page = if same {
-            self.state.prefs.page_of_last_file
-        } else {
-            1
-        };
-        // Prompt to resume from the last read page (only for generic opens,
-        // not for explicit starts like bookmarks/CLI/sibling navigation).
-        if !same && page == 1 && self.state.prefs.ask_resume_from_last_page {
-            if let Some(saved) = crate::lastread::LastReadDb::get(&path) {
-                if saved > 1 {
-                    self.open_path_with_page(path.clone(), 1);
-                    self.prompt_resume(path, saved, rc);
-                    return;
-                }
+        // Generic open (Open dialog): if the comic was previously read past
+        // page 1, ask whether to resume (or resume silently if the prompt is
+        // disabled). Explicit starts (CLI -p, bookmarks, sibling navigation)
+        // bypass this and call open_path_with_page directly.
+        let saved = crate::lastread::LastReadDb::get(&path).filter(|p| *p > 1);
+        match (self.state.prefs.ask_resume_from_last_page, saved) {
+            (true, Some(saved)) => {
+                // Show page 1 behind the prompt; jump if the user says Yes.
+                self.open_path_with_page(path.clone(), 1);
+                self.prompt_resume(path, saved, rc);
+            }
+            (false, Some(saved)) => {
+                self.open_path_with_page(path, saved);
+            }
+            _ => {
+                self.open_path_with_page(path, 1);
             }
         }
-        self.open_path_with_page(path, page);
     }
 
     /// Ask the user whether to resume from the saved page or start at page 1.
