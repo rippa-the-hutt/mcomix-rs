@@ -33,7 +33,12 @@ source=(
     # The source archive at the same tag, for the .desktop/MIME/icons.
     "mcomix-rs-src-${pkgver}.tar.gz::https://github.com/rippa-the-hutt/mcomix-rs/archive/refs/tags/v${pkgver}.tar.gz"
 )
-sha256sums=('SKIP' 'SKIP')
+# Hashes are pinned for the current pkgver. When bumping pkgver to a new
+# release, regenerate them with:  updkgsums
+sha256sums=(
+    'cc2e4a2125630a0fd82844d5044fe8d9117820351df33b50b3e64611714d3de9'
+    '18097fdc6e6f3fe8a492b55ba420c263869a0622693d620b818dc6592fbe62ae'
+)
 
 package() {
     # Binary from the release artifact.
