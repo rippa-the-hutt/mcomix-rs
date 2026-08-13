@@ -43,7 +43,7 @@ codegen-units = 1
 [package.metadata.deb]
 maintainer = "Rippa The Hutt <iacoporippagmail@duck.com>"
 copyright = "2026 Rippa The Hutt"
-license-file = ["../COPYING", "usr/share/doc/mcomix-rs/copyright"]
+license-file = "../COPYING"
 section = "graphics"
 priority = "optional"
 depends = "$auto, libgtk-4-1, libgdk-pixbuf-2.0-0, libglib2.0-0, libpango-1.0-0, libcairo2, liblzma5, libbz2-1.0"
