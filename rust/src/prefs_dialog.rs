@@ -98,6 +98,7 @@ struct PrefsForm {
     // Behaviour
     escape_quits: gtk::CheckButton,
     auto_load_last_file: gtk::CheckButton,
+    ask_resume: gtk::CheckButton,
     auto_open_next_archive: gtk::CheckButton,
     auto_open_next_directory: gtk::CheckButton,
     double_step: gtk::CheckButton,
@@ -143,6 +144,10 @@ impl PrefsForm {
             checkered_bg: check("Checkered background for transparent images", p.checkered_bg_for_transparent_images),
             escape_quits: check("Escape key closes program", p.escape_quits),
             auto_load_last_file: check("Load last opened file at startup", p.auto_load_last_file),
+            ask_resume: check(
+                "Ask to resume reading from the last page (if disabled, resumes without asking)",
+                p.ask_resume_from_last_page,
+            ),
             auto_open_next_archive: check("Automatically open the next archive", p.auto_open_next_archive),
             auto_open_next_directory: check("Automatically open the next directory", p.auto_open_next_directory),
             double_step: check("Double step in double page mode", p.double_step_in_double_page_mode),
@@ -212,6 +217,7 @@ impl PrefsForm {
         let grid = page_grid();
         add_row(&grid, "", Some(&self.escape_quits), &mut row);
         add_row(&grid, "", Some(&self.auto_load_last_file), &mut row);
+        add_row(&grid, "", Some(&self.ask_resume), &mut row);
         add_row(&grid, "", Some(&self.auto_open_next_archive), &mut row);
         add_row(&grid, "", Some(&self.auto_open_next_directory), &mut row);
         add_row(&grid, "", Some(&self.double_step), &mut row);
@@ -284,6 +290,7 @@ impl PrefsForm {
         p.checkered_bg_for_transparent_images = self.checkered_bg.is_active();
         p.escape_quits = self.escape_quits.is_active();
         p.auto_load_last_file = self.auto_load_last_file.is_active();
+        p.ask_resume_from_last_page = self.ask_resume.is_active();
         p.auto_open_next_archive = self.auto_open_next_archive.is_active();
         p.auto_open_next_directory = self.auto_open_next_directory.is_active();
         p.double_step_in_double_page_mode = self.double_step.is_active();

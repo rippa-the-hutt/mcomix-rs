@@ -1118,20 +1118,53 @@ impl Ui {
             glib::clone!(@strong rc => move |res| {
                 if let Ok(file) = res {
                     if let Some(p) = file.path() {
-                        rc.borrow_mut().open_path(p);
+                        rc.borrow_mut().open_path(p, rc.clone());
                     }
                 }
             }),
         );
     }
 
-    pub fn open_path(&mut self, path: PathBuf) {
-        let page = if self.state.prefs.path_to_last_file == path.to_string_lossy() {
+    pub fn open_path(&mut self, path: PathBuf, rc: Rc<RefCell<Ui>>) {
+        let same = self.state.prefs.path_to_last_file == path.to_string_lossy();
+        let page = if same {
             self.state.prefs.page_of_last_file
         } else {
             1
         };
+        // Prompt to resume from the last read page (only for generic opens,
+        // not for explicit starts like bookmarks/CLI/sibling navigation).
+        if !same && page == 1 && self.state.prefs.ask_resume_from_last_page {
+            if let Some(saved) = crate::lastread::LastReadDb::get(&path) {
+                if saved > 1 {
+                    self.open_path_with_page(path.clone(), 1);
+                    self.prompt_resume(path, saved, rc);
+                    return;
+                }
+            }
+        }
         self.open_path_with_page(path, page);
+    }
+
+    /// Ask the user whether to resume from the saved page or start at page 1.
+    fn prompt_resume(&self, path: PathBuf, saved: u32, rc: Rc<RefCell<Ui>>) {
+        let dlg = gtk::AlertDialog::builder()
+            .message(crate::i18n::trf("Continue reading from page %d?", &[&saved.to_string()]))
+            .detail(format!(
+                "You previously stopped reading this book on page {saved}. If you choose \
+                 'Yes', reading will resume on page {saved}. Otherwise, the first page \
+                 will be loaded."
+            ))
+            .build();
+        dlg.set_buttons(&[&crate::i18n::tr("Yes"), &crate::i18n::tr("No")]);
+        let rc2 = rc.clone();
+        dlg.choose(Some(&self.window), None::<&gio::Cancellable>, move |res| {
+            let idx = res.unwrap_or(1);
+            if idx == 0 {
+                let mut ui = rc2.borrow_mut();
+                ui.goto_index(saved.saturating_sub(1) as usize, ScrollDest::Start);
+            }
+        });
     }
 
     pub fn open_path_with_page(&mut self, path: PathBuf, start_page: u32) {

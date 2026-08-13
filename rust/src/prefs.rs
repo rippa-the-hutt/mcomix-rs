@@ -133,6 +133,7 @@ pub struct Prefs {
     pub lens_size: u32,
     pub lens_magnification: u32,
     pub language: String,
+    pub ask_resume_from_last_page: bool,
 
     // Window geometry
     pub window_x: i32,
@@ -208,6 +209,7 @@ impl Default for Prefs {
             lens_size: 200,
             lens_magnification: 2,
             language: "auto".to_string(),
+            ask_resume_from_last_page: true,
             window_x: 0,
             window_y: 0,
             window_width: 1024,
