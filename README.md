@@ -58,6 +58,17 @@ cargo build --release
 ./target/release/mcomix-rs "/path/to/comic.cbz"
 ```
 
+Arch Linux:
+
+```bash
+# Arch dependencies
+sudo pacman -S --needed base-devel gtk4 gdk-pixbuf2 glib2 pango cairo xz bzip2
+
+cd rust
+cargo build --release
+./target/release/mcomix-rs "/path/to/comic.cbz"
+```
+
 ### Building the Windows artifacts from Linux (cross-compile)
 
 No Windows machine or runner needed — the portable zip and NSIS installer are
