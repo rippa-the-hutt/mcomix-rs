@@ -260,6 +260,11 @@ pub struct Ui {
     pub btn_openwith: gtk::Button,
     pub btn_about: gtk::Button,
     pub btn_bookmarks: gtk::MenuButton,
+    /// "More" overflow button shown when the toolbar is too narrow.
+    pub more_btn: gtk::MenuButton,
+    pub more_popover: gtk::Popover,
+    /// Secondary buttons that collapse into the overflow menu.
+    pub overflow_buttons: Vec<(String, gtk::Button)>,
     pub bookmarks_popover: gtk::Popover,
     /// On-screen display (page info, auto-hides).
     pub osd: gtk::Label,
@@ -391,6 +396,15 @@ impl Ui {
         let bookmarks_popover = gtk::Popover::new();
         btn_bookmarks.set_popover(Some(&bookmarks_popover));
 
+        // Overflow ("more") menu for narrow windows (i3 etc.).
+        let more_btn = gtk::MenuButton::new();
+        more_btn.set_icon_name("open-menu-symbolic");
+        more_btn.set_tooltip_text(Some("More"));
+        more_btn.set_visible(false);
+        toolbar.append(&more_btn);
+        let more_popover = gtk::Popover::new();
+        more_btn.set_popover(Some(&more_popover));
+
         let btn_library = gtk::Button::from_icon_name("folder");
         btn_library.set_tooltip_text(Some(&crate::i18n::tr("Library")));
         toolbar.append(&btn_library);
@@ -398,6 +412,15 @@ impl Ui {
         let btn_prefs = gtk::Button::from_icon_name("preferences-system");
         btn_prefs.set_tooltip_text(Some(&crate::i18n::tr("Preferences")));
         toolbar.append(&btn_prefs);
+
+        let overflow_buttons: Vec<(String, gtk::Button)> = vec![
+            (crate::i18n::tr("Enhance image"), btn_enhance.clone().upcast::<gtk::Button>()),
+            (crate::i18n::tr("Magnifying lens"), btn_lens.clone().upcast::<gtk::Button>()),
+            (crate::i18n::tr("Open with…"), btn_openwith.clone().upcast::<gtk::Button>()),
+            (crate::i18n::tr("Library"), btn_library.clone().upcast::<gtk::Button>()),
+            (crate::i18n::tr("Preferences"), btn_prefs.clone().upcast::<gtk::Button>()),
+            (crate::i18n::tr("About"), btn_about.clone().upcast::<gtk::Button>()),
+        ];
 
         // Clicking toolbar buttons must not move keyboard focus away from the
         // viewer (so arrow/Page keys keep working after mouse usage).
@@ -536,6 +559,9 @@ impl Ui {
             btn_about,
             btn_bookmarks,
             bookmarks_popover,
+            more_btn,
+            more_popover,
+            overflow_buttons,
             osd,
             osd_source: None,
             osd_fired: Rc::new(std::cell::Cell::new(false)),
@@ -550,6 +576,7 @@ impl Ui {
 
         ui.borrow().connect_signals(ui.clone());
         ui.borrow_mut().rebuild_bookmarks_popover(ui.clone());
+        ui.borrow_mut().rebuild_more_popover();
 
         // Persistent thumbnail channel + main-loop poller.
         // Background page-decoder channel + worker, created once for the app
@@ -993,7 +1020,9 @@ impl Ui {
         {
             let r = rc.clone();
             glib::timeout_add_local(Duration::from_millis(100), move || {
-                r.borrow_mut().schedule_redraw();
+                let mut ui = r.borrow_mut();
+                ui.update_toolbar_overflow();
+                ui.schedule_redraw();
                 glib::ControlFlow::Continue
             });
         }
@@ -1138,6 +1167,43 @@ impl Ui {
                 glib::Propagation::Proceed
             }
         });
+    }
+
+    /// Build the overflow menu rows (each row clicks its underlying button,
+    /// so handlers stay in one place).
+    pub fn rebuild_more_popover(&mut self) {
+        let boxv = gtk::Box::new(gtk::Orientation::Vertical, 2);
+        boxv.set_width_request(200);
+        boxv.set_margin_top(6);
+        boxv.set_margin_bottom(6);
+        boxv.set_margin_start(6);
+        boxv.set_margin_end(6);
+        let items = self.overflow_buttons.clone();
+        for (label, btn) in &items {
+            let row = gtk::Button::with_label(label);
+            row.set_halign(gtk::Align::Fill);
+            let b = btn.clone();
+            row.connect_clicked(move |_| {
+                b.emit_clicked();
+            });
+            boxv.append(&row);
+        }
+        self.more_popover.set_child(Some(&boxv));
+        self.more_btn.set_popover(Some(&self.more_popover));
+    }
+
+    /// When the toolbar cannot fit, hide the secondary buttons and show the
+    /// overflow menu (and vice versa).
+    pub fn update_toolbar_overflow(&mut self) {
+        let alloc = self.toolbar.allocation().width();
+        let (_, natural, _, _) = self.toolbar.measure(gtk::Orientation::Horizontal, -1);
+        let overflow = alloc < natural;
+        if overflow != self.more_btn.is_visible() {
+            for (_, b) in &self.overflow_buttons {
+                b.set_visible(!overflow);
+            }
+            self.more_btn.set_visible(overflow);
+        }
     }
 
     // ================= file handling =================
