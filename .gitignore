@@ -24,3 +24,4 @@ release/
 /rust/packaging/arch/*-package.log
 /rust/packaging/arch/src/
 /rust/packaging/arch/pkg/
+/rust/packaging/arch/*.tar.gz
