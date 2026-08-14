@@ -25,7 +25,7 @@ plain image directories — including archives embedded inside archives.
 - Bookmarks, library (SQLite) with cover grid and watch folders
 - "Continue reading?" resume prompt, last-read-page tracking
 - Configurable keybindings and preferences (JSON)
-- i18n: 23 languages embedded (same catalogs as MComix3)
+- i18n: 23 languages embedded
 - Click-to-advance and drag-to-pan, like the original
 
 ## Installation
@@ -52,8 +52,8 @@ paru -S mcomix-rs
 ```
 
 The AUR package downloads the prebuilt Linux artifact from the GitHub
-release (no compilation), verifies the sha256 checksums, and replaces the
-old Python `mcomix3` package.
+release (no compilation) and verifies the sha256 checksums. It can be
+installed alongside the original Python `mcomix3` package.
 
 ### Windows
 
