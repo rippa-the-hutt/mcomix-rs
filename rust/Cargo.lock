@@ -1115,7 +1115,7 @@ dependencies = [
 
 [[package]]
 name = "mcomix-rs"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "bzip2 0.4.4",
  "clap",
