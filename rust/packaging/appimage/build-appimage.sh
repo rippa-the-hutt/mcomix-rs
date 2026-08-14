@@ -35,10 +35,10 @@ cp "$ROOT/packaging/linux/mcomix-rs.desktop" "$APPDIR/usr/share/applications/"
 # appimagetool requires a .desktop file at the AppDir root.
 cp "$ROOT/packaging/linux/mcomix-rs.desktop" "$APPDIR/mcomix-rs.desktop"
 # appimagetool also requires the icon referenced by the desktop file
-# (Icon=mcomix3) at the AppDir root.
-cp "$ROOT/packaging/linux/icons/256x256/apps/mcomix3.png" "$APPDIR/mcomix3.png"
-cp "$ROOT/packaging/linux/icons/256x256/apps/mcomix3.png" \
-    "$APPDIR/usr/share/icons/hicolor/256x256/apps/mcomix3.png"
+# (Icon=mcomix-rs) at the AppDir root.
+cp "$ROOT/packaging/linux/icons/256x256/apps/mcomix-rs.png" "$APPDIR/mcomix-rs.png"
+cp "$ROOT/packaging/linux/icons/256x256/apps/mcomix-rs.png" \
+    "$APPDIR/usr/share/icons/hicolor/256x256/apps/mcomix-rs.png"
 
 # ---- bundle the runtime libraries (via ldd), excluding glibc internals ----
 echo "==> Bundling shared libraries"
