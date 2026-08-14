@@ -36,19 +36,19 @@ plain image directories — including archives embedded inside archives.
 |---|---|
 | **AppImage** (standalone) | GitHub Releases — download, `chmod +x`, run |
 | **.deb** (Debian/Ubuntu ≥ 24.04) | GitHub Releases, or build with `cargo deb` |
-| **Arch Linux (AUR)** | `mcomix-rs` on the AUR — see below |
+| **Arch Linux (AUR)** | `mcomix-rs-bin` on the AUR — see below |
 | **Arch Linux (manual)** | `rust/packaging/arch/PKGBUILD` via `makepkg -si` |
 | **Tarball** (binary only) | GitHub Releases — needs the GTK4 runtime |
 
 Arch Linux users can install the binary package straight from the
-[AUR](https://aur.archlinux.org/packages/mcomix-rs):
+[AUR](https://aur.archlinux.org/packages/mcomix-rs-bin):
 
 ```bash
 # Using yay
-yay -S mcomix-rs
+yay -S mcomix-rs-bin
 
 # Using paru
-paru -S mcomix-rs
+paru -S mcomix-rs-bin
 ```
 
 The AUR package downloads the prebuilt Linux artifact from the GitHub
