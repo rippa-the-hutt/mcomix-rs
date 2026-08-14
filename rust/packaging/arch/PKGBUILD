@@ -10,9 +10,6 @@ pkgdesc="A user-friendly, customizable comic book image viewer (Rust/GTK4 port)"
 arch=('x86_64')
 url="https://github.com/rippa-the-hutt/mcomix-rs"
 license=('GPL2')
-# mcomix-rs supersedes the Python mcomix3 package (same icons/desktop files).
-conflicts=('mcomix3')
-replaces=('mcomix3')
 depends=(
     'gtk4'
     'gdk-pixbuf2'
@@ -53,9 +50,9 @@ package() {
         "${pkgdir}/usr/share/mime/packages/mcomix-rs.xml"
 
     for d in 16x16 22x22 24x24 32x32 48x48 256x256; do
-        install -Dm644 "${linuxdir}/icons/${d}/apps/mcomix3.png" \
-            "${pkgdir}/usr/share/icons/hicolor/${d}/apps/mcomix3.png" 2>/dev/null || true
-        for mime in application-x-cbz application-x-cbr application-x-cbt; do
+        install -Dm644 "${linuxdir}/icons/${d}/apps/mcomix-rs.png" \
+            "${pkgdir}/usr/share/icons/hicolor/${d}/apps/mcomix-rs.png" 2>/dev/null || true
+        for mime in application-x-mcomix-cbz application-x-mcomix-cbr application-x-mcomix-cbt; do
             install -Dm644 "${linuxdir}/icons/${d}/mimetypes/${mime}.png" \
                 "${pkgdir}/usr/share/icons/hicolor/${d}/mimetypes/${mime}.png" 2>/dev/null || true
         done
