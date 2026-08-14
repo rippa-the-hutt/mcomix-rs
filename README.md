@@ -60,7 +60,7 @@ installed alongside the original Python `mcomix3` package.
 - **Portable zip** — no-install folder with the `.exe` and all bundled DLLs/data.
 - **Installer** — NSIS `mcomix-rs-setup-<ver>.exe`.
 
-Both are produced from the GitHub Releases workflow (MSYS2/MINGW64 build).
+Both are produced from the GitHub [Releases](https://github.com/rippa-the-hutt/mcomix-rs/releases) workflow (MSYS2/MINGW64 build).
 
 ## Building from source
 
