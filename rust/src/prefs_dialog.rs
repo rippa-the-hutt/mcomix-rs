@@ -90,6 +90,7 @@ fn dropdown(labels: &[&str], selected: u32) -> gtk::DropDown {
 struct PrefsForm {
     // Appearance
     language: gtk::DropDown,
+    gtk_theme: gtk::DropDown,
     bg_color: gtk::ColorDialogButton,
     thumb_bg_color: gtk::ColorDialogButton,
     show_page_numbers: gtk::CheckButton,
@@ -135,10 +136,25 @@ impl PrefsForm {
             .position(|l| *l == p.language)
             .map(|i| i + 1)
             .unwrap_or(0);
+        let theme_idx = match p.gtk_theme.as_str() {
+            "dark" => 1,
+            "light" => 2,
+            _ => 0,
+        };
+        // Pass an explicit ColorDialog: new(None) NULLs the construct-only
+        // 'dialog' property, leaving the button without a dialog and
+        // crashing with 'GTK_IS_COLOR_DIALOG' when clicked.
+        let bg_color = gtk::ColorDialogButton::new(Some(gtk::ColorDialog::new()));
+        let thumb_bg_color = gtk::ColorDialogButton::new(Some(gtk::ColorDialog::new()));
+        // Initialise both from the stored preferences (the GTK default is a
+        // red that would otherwise show in the button).
+        bg_color.set_rgba(&rgba_from_prefs(&p.bg_color));
+        thumb_bg_color.set_rgba(&rgba_from_prefs(&p.thumb_bg_color));
         PrefsForm {
             language: dropdown(&lang_labels, lang_idx as u32),
-            bg_color: gtk::ColorDialogButton::new(None),
-            thumb_bg_color: gtk::ColorDialogButton::new(None),
+            gtk_theme: dropdown(&["System", "Dark", "Light"], theme_idx),
+            bg_color,
+            thumb_bg_color,
             show_page_numbers: check("Show page numbers on thumbnails", p.show_page_numbers_on_thumbnails),
             thumbnail_size: spin(p.thumbnail_size as f64, 20.0, 500.0, 10.0, 0),
             checkered_bg: check("Checkered background for transparent images", p.checkered_bg_for_transparent_images),
@@ -196,11 +212,13 @@ impl PrefsForm {
             Some(&self.language),
             &mut row,
         );
-        {
-            let btn = &self.bg_color;
-            btn.set_rgba(&rgba_from_prefs(&self.bg_color_value()));
-            add_row(&grid, "Background colour:", Some(btn), &mut row);
-        }
+        add_row(
+            &grid,
+            &crate::i18n::tr("GTK theme:"),
+            Some(&self.gtk_theme),
+            &mut row,
+        );
+        add_row(&grid, "Background colour:", Some(&self.bg_color), &mut row);
         add_row(&grid, "Thumbnail background colour:", Some(&self.thumb_bg_color), &mut row);
         add_row(&grid, "", Some(&self.show_page_numbers), &mut row);
         add_row(&grid, "Thumbnail size (pixels):", Some(&self.thumbnail_size), &mut row);
@@ -271,10 +289,6 @@ impl PrefsForm {
         stack
     }
 
-    fn bg_color_value(&self) -> [u16; 3] {
-        prefs_from_rgba(&self.bg_color.rgba())
-    }
-
     fn collect(&self, base: &Prefs) -> Prefs {
         let mut p = base.clone();
         let lang_sel = self.language.selected();
@@ -282,6 +296,11 @@ impl PrefsForm {
             "auto".to_string()
         } else {
             crate::i18n::available_languages()[(lang_sel - 1) as usize].to_string()
+        };
+        p.gtk_theme = match self.gtk_theme.selected() {
+            1 => "dark".to_string(),
+            2 => "light".to_string(),
+            _ => "system".to_string(),
         };
         p.bg_color = prefs_from_rgba(&self.bg_color.rgba());
         p.thumb_bg_color = prefs_from_rgba(&self.thumb_bg_color.rgba());
