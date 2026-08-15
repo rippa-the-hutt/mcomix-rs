@@ -2183,9 +2183,10 @@ impl Ui {
     /// cleared (it was finished by moving on), so reopening it later starts
     /// fresh instead of prompting to resume from the last page.
     fn next_book(&mut self) {
-        let is_archive = self
-            .state
-            .path
+        // Capture the *current* (finished) book's path BEFORE the transition:
+        // the open calls replace self.state.path with the new book.
+        let finished = self.state.path.clone();
+        let is_archive = finished
             .as_ref()
             .map(|p| archive::detect(p).is_some())
             .unwrap_or(false);
@@ -2200,7 +2201,9 @@ impl Ui {
             opened = self.open_sibling_directory(1);
         }
         if opened {
-            self.clear_current_position();
+            if let Some(path) = finished {
+                self.clear_position_for(&path);
+            }
         }
     }
 
@@ -2210,9 +2213,8 @@ impl Ui {
     /// Same as next_book: a successful transition clears the current book's
     /// saved position (it was finished by moving on).
     fn previous_book(&mut self) {
-        let is_archive = self
-            .state
-            .path
+        let finished = self.state.path.clone();
+        let is_archive = finished
             .as_ref()
             .map(|p| archive::detect(p).is_some())
             .unwrap_or(false);
@@ -2227,18 +2229,17 @@ impl Ui {
             opened = self.open_sibling_directory(-1);
         }
         if opened {
-            self.clear_current_position();
+            if let Some(path) = finished {
+                self.clear_position_for(&path);
+            }
         }
     }
 
-    /// Reset the current book's saved reading position (last-read DB + prefs),
-    /// so a finished book does not prompt to resume from its last page.
-    fn clear_current_position(&mut self) {
-        let Some(path) = self.state.path.clone() else {
-            return;
-        };
+    /// Reset a (finished) book's saved reading position (last-read DB +
+    /// prefs), so it does not prompt to resume from its last page.
+    fn clear_position_for(&mut self, path: &Path) {
         log::info!("clearing saved position for finished book: {}", path.display());
-        crate::lastread::LastReadDb::set(&path, 1);
+        crate::lastread::LastReadDb::set(path, 1);
         self.state.prefs.path_to_last_file = path.to_string_lossy().into_owned();
         self.state.prefs.page_of_last_file = 1;
         self.state.prefs.save();
