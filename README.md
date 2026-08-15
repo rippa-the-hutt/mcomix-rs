@@ -104,19 +104,58 @@ bash packaging/windows/cross-build-linux.sh
 # -> dist/mcomix-rs-<ver>-windows-x86_64.zip and dist/mcomix-rs-setup-<ver>.exe
 ```
 
-## Releases
+## Continuous integration (CI)
 
-Releases are produced entirely by the GitHub Actions workflow in
-`.github/workflows/release.yml`:
+All builds run on GitHub Actions (`.github/workflows/release.yml`). The
+workflow is triggered by **pushing a `v*` tag** (e.g. `v0.3.2`) and can also
+be started manually from the Actions tab ("workflow_dispatch").
 
-1. **Tag the release**: `git tag v0.1.0 && git push origin v0.1.0`
-2. The workflow builds and uploads:
-   - Linux: `.deb` (cargo-deb), standalone tarball, and a self-contained **AppImage**
-   - Windows: portable zip + NSIS installer, **cross-compiled on a Linux runner**
-3. A **draft** GitHub Release is created with all artifacts attached — review
-   and publish it manually from the Releases page.
+| Job | Runs on | Produces |
+|---|---|---|
+| `linux` | ubuntu-24.04 | `.deb` (via `cargo deb`), standalone tarball |
+| `appimage` | ubuntu-24.04 | self-contained `mcomix-rs-<ver>-x86_64.AppImage` |
+| `windows-cross` | ubuntu-24.04 | Windows portable zip + NSIS installer, **cross-compiled from Linux** |
+| `release` | ubuntu-24.04 | creates a **draft GitHub Release** with all artifacts |
 
-You can also run the individual packaging scripts locally:
+Each build job runs `cargo test --release` too, so the test suite is part of
+the gate.
+
+### How to use it
+
+1. **Push your changes** to `develop`, then merge into `main`
+   (`git checkout main && git merge develop --no-ff && git push origin main`).
+2. **Tag the release** and push the tag — this is what triggers the build:
+   ```bash
+   git tag v0.3.2
+   git push origin v0.3.2
+   ```
+   (Force-moving an existing tag, `git tag -f v0.3.2 && git push -f origin v0.3.2`,
+   re-runs the workflow — useful to retry after a fix.)
+3. **Watch the run** on the repository's **Actions** tab. A green dot means
+   all jobs passed; click a failing job to see its logs.
+4. When everything is green, go to the **Releases** tab, open the **draft
+   release**, review/edit the notes and **publish** it.
+5. **Arch/AUR**: bump `pkgver` in `rust/packaging/arch/PKGBUILD` to the new
+   version and regenerate the checksums with `updkgsums` (the hashes change
+   with every release).
+
+### Running the tests locally (offline)
+
+The same test suite that CI runs can be executed on your machine with no
+network access (after the dependencies are fetched once):
+
+```bash
+cd rust
+cargo test          # unit + integration tests
+cargo build         # debug binary
+```
+
+The only requirement is the GTK4 development toolchain (see "Building from
+source"); the test fixtures live in the repository (`test/files/`), so
+nothing is downloaded at test time. Optional archive backends (`unrar`,
+`7z`, `mutool`) are not needed for the test suite.
+
+### Running the packaging scripts locally
 
 | Artifact | Command (from `rust/`) |
 |---|---|
