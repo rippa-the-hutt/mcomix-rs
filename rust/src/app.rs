@@ -3748,54 +3748,65 @@ fn first_or_last_matching(dir: &Path, want_archives: bool, delta: i32) -> Option
 #[cfg(test)]
 mod nav_tests {
     use super::*;
+    use std::fs;
 
-    fn structure() -> PathBuf {
-        PathBuf::from("/tmp/nav-test")
+    /// Build a self-contained fixture tree in a temp dir (CI runners have no
+    /// pre-existing /tmp/nav-test):
+    ///   root/AA/{AA1.cbz,AA2.cbz}   root/BB/{BB1.cbz}
+    ///   root/CC/{readme.txt}        root/Empty/
+    /// The .cbz files only need the ZIP magic so archive::detect recognizes
+    /// them (they are not opened in these tests).
+    ///
+    /// Each call gets a UNIQUE root (counter + pid) so the parallel test
+    /// harness cannot race on shared state.
+    fn nav_fixture() -> PathBuf {
+        static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let root = std::env::temp_dir().join(format!(
+            "mcomix-rs-nav-test-{}-{n}",
+            std::process::id()
+        ));
+        let zip_magic = b"PK\x03\x04".to_vec();
+        let mk = |name: &str, content: &[u8]| {
+            fs::create_dir_all(root.join(name).parent().unwrap()).unwrap();
+            fs::write(root.join(name), content).unwrap();
+        };
+        mk("AA/AA1.cbz", &zip_magic);
+        mk("AA/AA2.cbz", &zip_magic);
+        mk("BB/BB1.cbz", &zip_magic);
+        mk("CC/readme.txt", b"hello");
+        fs::create_dir_all(root.join("Empty")).unwrap();
+        root
     }
 
     #[test]
     fn next_directory_found() {
+        let root = nav_fixture();
         // AA -> BB -> CC -> Empty
-        assert_eq!(
-            sibling_directory(&structure().join("AA"), 1),
-            Some(structure().join("BB"))
-        );
-        assert_eq!(
-            sibling_directory(&structure().join("BB"), 1),
-            Some(structure().join("CC"))
-        );
-        // CC (has only readme.txt) -> Empty
-        assert_eq!(
-            sibling_directory(&structure().join("CC"), 1),
-            Some(structure().join("Empty"))
-        );
+        assert_eq!(sibling_directory(&root.join("AA"), 1), Some(root.join("BB")));
+        assert_eq!(sibling_directory(&root.join("BB"), 1), Some(root.join("CC")));
+        assert_eq!(sibling_directory(&root.join("CC"), 1), Some(root.join("Empty")));
     }
 
     #[test]
     fn previous_directory_found() {
-        assert_eq!(
-            sibling_directory(&structure().join("Empty"), -1),
-            Some(structure().join("CC"))
-        );
-        assert_eq!(
-            sibling_directory(&structure().join("BB"), -1),
-            Some(structure().join("AA"))
-        );
+        let root = nav_fixture();
+        assert_eq!(sibling_directory(&root.join("Empty"), -1), Some(root.join("CC")));
+        assert_eq!(sibling_directory(&root.join("BB"), -1), Some(root.join("AA")));
     }
 
     #[test]
     fn no_next_directory_returns_none() {
-        // Empty is the last directory: no next.
-        assert_eq!(sibling_directory(&structure().join("Empty"), 1), None);
-        // AA is the first: no previous.
-        assert_eq!(sibling_directory(&structure().join("AA"), -1), None);
-        // Nonexistent directory.
-        assert_eq!(sibling_directory(&structure().join("ZZZ"), 1), None);
+        let root = nav_fixture();
+        assert_eq!(sibling_directory(&root.join("Empty"), 1), None);
+        assert_eq!(sibling_directory(&root.join("AA"), -1), None);
+        assert_eq!(sibling_directory(&root.join("ZZZ"), 1), None);
     }
 
     #[test]
     fn first_or_last_matching_archives() {
-        let aa = structure().join("AA");
+        let root = nav_fixture();
+        let aa = root.join("AA");
         let first = first_or_last_matching(&aa, true, 1).expect("AA has archives");
         assert!(first.ends_with("AA1.cbz"));
         let last = first_or_last_matching(&aa, true, -1).expect("AA has archives");
@@ -3804,11 +3815,10 @@ mod nav_tests {
 
     #[test]
     fn directory_without_comics_returns_none() {
-        // CC only has readme.txt -> no archives, no images.
-        assert_eq!(first_or_last_matching(&structure().join("CC"), true, 1), None);
-        assert_eq!(first_or_last_matching(&structure().join("CC"), false, 1), None);
-        // Empty directory.
-        assert_eq!(first_or_last_matching(&structure().join("Empty"), true, 1), None);
+        let root = nav_fixture();
+        assert_eq!(first_or_last_matching(&root.join("CC"), true, 1), None);
+        assert_eq!(first_or_last_matching(&root.join("CC"), false, 1), None);
+        assert_eq!(first_or_last_matching(&root.join("Empty"), true, 1), None);
     }
 }
 
@@ -3854,7 +3864,7 @@ fn apply_gtk_theme(window: &gtk::ApplicationWindow, prefs: &Prefs) {
         return;
     }
     let css = format!(
-        ".mcomix-theme-dark {{ {prop}: dark; }} \
+        ".mcomix-theme-dark {{ {prop}: dark; }} \\
          .mcomix-theme-light {{ {prop}: light; }}"
     );
     let provider = gtk::CssProvider::new();
