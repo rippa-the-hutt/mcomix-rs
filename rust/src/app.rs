@@ -2017,14 +2017,14 @@ impl Ui {
         };
         let target = self.state.page as i32 + n * step;
         if target >= count as i32 {
-            if n > 0 && self.state.prefs.auto_open_next_archive && self.open_next_in_dir() {
-                return;
+            if n > 0 {
+                self.next_book();
             }
             return;
         }
         if target < 0 {
-            if n < 0 && self.state.prefs.auto_open_next_archive && self.open_prev_in_dir() {
-                return;
+            if n < 0 {
+                self.previous_book();
             }
             return;
         }
@@ -2168,6 +2168,56 @@ impl Ui {
         }
     }
 
+    /// Whether a boundary flip may open the next/previous archive
+    /// (mirrors Python's next_book condition: auto-open, or slideshow with
+    /// 'slideshow can go to next archive').
+    fn can_open_next_archive(&self) -> bool {
+        self.state.prefs.auto_open_next_archive
+            || (self.state.slideshow && self.state.prefs.slideshow_can_go_to_next_archive)
+    }
+
+    /// At the end of the last page: open the next archive (if enabled), else
+    /// fall back to the next directory (if enabled).
+    fn next_book(&mut self) {
+        let is_archive = self
+            .state
+            .path
+            .as_ref()
+            .map(|p| archive::detect(p).is_some())
+            .unwrap_or(false);
+        let mut opened = false;
+        if self.can_open_next_archive() {
+            opened = self.open_next_in_dir();
+        }
+        if !opened
+            && self.state.prefs.auto_open_next_directory
+            && (!is_archive || self.state.prefs.auto_open_next_archive)
+        {
+            self.open_sibling_directory(1);
+        }
+    }
+
+    /// At the start of the first page: open the previous archive (if enabled),
+    /// else fall back to the previous directory (if enabled).
+    fn previous_book(&mut self) {
+        let is_archive = self
+            .state
+            .path
+            .as_ref()
+            .map(|p| archive::detect(p).is_some())
+            .unwrap_or(false);
+        let mut opened = false;
+        if self.can_open_next_archive() {
+            opened = self.open_prev_in_dir();
+        }
+        if !opened
+            && self.state.prefs.auto_open_next_directory
+            && (!is_archive || self.state.prefs.auto_open_next_archive)
+        {
+            self.open_sibling_directory(-1);
+        }
+    }
+
     fn open_next_in_dir(&mut self) -> bool {
         let Some(path) = self.state.path.clone() else {
             return false;
@@ -2221,6 +2271,39 @@ impl Ui {
         // the last page (open_path_with_page clamps to the last page for
         // oversized page numbers).
         let start_page = if delta < 0 { u32::MAX } else { 1 };
+        self.open_path_with_page(path, start_page);
+        true
+    }
+
+    /// Fall back to the next/previous sibling *directory* (mirrors Python's
+    /// open_next_directory/open_previous_directory): move to the neighbour
+    /// directory, open its first file (forward) or last file (backward,
+    /// starting at its last page), or the directory itself if it has no
+    /// matching files.
+    fn open_sibling_directory(&mut self, delta: i32) -> bool {
+        let Some(current_path) = self.state.path.clone() else {
+            return false;
+        };
+        let current_dir = if current_path.is_dir() {
+            current_path
+        } else {
+            match current_path.parent() {
+                Some(p) => p.to_path_buf(),
+                None => return false,
+            }
+        };
+        let Some(target_dir) = sibling_directory(&current_dir, delta) else {
+            return false;
+        };
+        let is_archive = archive::detect(&current_dir).is_some();
+        let path = first_or_last_matching(&target_dir, is_archive, delta)
+            .unwrap_or_else(|| target_dir.clone());
+        let start_page = if delta < 0 { u32::MAX } else { 1 };
+        info!(
+            "opening sibling directory {} -> {}",
+            current_dir.display(),
+            target_dir.display()
+        );
         self.open_path_with_page(path, start_page);
         true
     }
@@ -3565,5 +3648,131 @@ fn apply_background_css(prefs: &Prefs) {
             &provider,
             gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
         );
+    }
+}
+
+/// The sibling directory of `current` (natural-sorted) offset by `delta`
+/// (+1 = next, -1 = previous), or None if it does not exist.
+fn sibling_directory(current: &Path, delta: i32) -> Option<PathBuf> {
+    let parent = current.parent()?;
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    let entries = std::fs::read_dir(parent).ok()?;
+    for entry in entries.flatten() {
+        let p = entry.path();
+        if p.is_dir() {
+            dirs.push(p);
+        }
+    }
+    if dirs.is_empty() {
+        return None;
+    }
+    let mut names: Vec<String> = dirs
+        .iter()
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect();
+    crate::natsort::natural_sort(&mut names);
+    let cur = current.to_string_lossy().into_owned();
+    let pos = names.iter().position(|n| *n == cur)?;
+    let target = pos as i32 + delta;
+    if target < 0 || target >= names.len() as i32 {
+        return None;
+    }
+    Some(PathBuf::from(&names[target as usize]))
+}
+
+/// First (delta >= 0) or last (delta < 0) archive/image file in `dir`
+/// matching `want_archives`, or None if the directory has no matching files.
+fn first_or_last_matching(dir: &Path, want_archives: bool, delta: i32) -> Option<PathBuf> {
+    let mut files: Vec<String> = Vec::new();
+    let rd = std::fs::read_dir(dir).ok()?;
+    for e in rd.flatten() {
+        let p = e.path();
+        if !p.is_file() {
+            continue;
+        }
+        let ok = if want_archives {
+            archive::detect(&p).is_some()
+        } else {
+            archive::is_image_file(&p.to_string_lossy())
+        };
+        if ok {
+            files.push(p.to_string_lossy().into_owned());
+        }
+    }
+    if files.is_empty() {
+        return None;
+    }
+    crate::natsort::natural_sort(&mut files);
+    if delta < 0 {
+        Some(PathBuf::from(files[files.len() - 1].clone()))
+    } else {
+        Some(PathBuf::from(files[0].clone()))
+    }
+}
+
+#[cfg(test)]
+mod nav_tests {
+    use super::*;
+
+    fn structure() -> PathBuf {
+        PathBuf::from("/tmp/nav-test")
+    }
+
+    #[test]
+    fn next_directory_found() {
+        // AA -> BB -> CC -> Empty
+        assert_eq!(
+            sibling_directory(&structure().join("AA"), 1),
+            Some(structure().join("BB"))
+        );
+        assert_eq!(
+            sibling_directory(&structure().join("BB"), 1),
+            Some(structure().join("CC"))
+        );
+        // CC (has only readme.txt) -> Empty
+        assert_eq!(
+            sibling_directory(&structure().join("CC"), 1),
+            Some(structure().join("Empty"))
+        );
+    }
+
+    #[test]
+    fn previous_directory_found() {
+        assert_eq!(
+            sibling_directory(&structure().join("Empty"), -1),
+            Some(structure().join("CC"))
+        );
+        assert_eq!(
+            sibling_directory(&structure().join("BB"), -1),
+            Some(structure().join("AA"))
+        );
+    }
+
+    #[test]
+    fn no_next_directory_returns_none() {
+        // Empty is the last directory: no next.
+        assert_eq!(sibling_directory(&structure().join("Empty"), 1), None);
+        // AA is the first: no previous.
+        assert_eq!(sibling_directory(&structure().join("AA"), -1), None);
+        // Nonexistent directory.
+        assert_eq!(sibling_directory(&structure().join("ZZZ"), 1), None);
+    }
+
+    #[test]
+    fn first_or_last_matching_archives() {
+        let aa = structure().join("AA");
+        let first = first_or_last_matching(&aa, true, 1).expect("AA has archives");
+        assert!(first.ends_with("AA1.cbz"));
+        let last = first_or_last_matching(&aa, true, -1).expect("AA has archives");
+        assert!(last.ends_with("AA2.cbz"));
+    }
+
+    #[test]
+    fn directory_without_comics_returns_none() {
+        // CC only has readme.txt -> no archives, no images.
+        assert_eq!(first_or_last_matching(&structure().join("CC"), true, 1), None);
+        assert_eq!(first_or_last_matching(&structure().join("CC"), false, 1), None);
+        // Empty directory.
+        assert_eq!(first_or_last_matching(&structure().join("Empty"), true, 1), None);
     }
 }
