@@ -2178,6 +2178,10 @@ impl Ui {
 
     /// At the end of the last page: open the next archive (if enabled), else
     /// fall back to the next directory (if enabled).
+    ///
+    /// When a transition succeeds, the *current* book's saved position is
+    /// cleared (it was finished by moving on), so reopening it later starts
+    /// fresh instead of prompting to resume from the last page.
     fn next_book(&mut self) {
         let is_archive = self
             .state
@@ -2193,12 +2197,18 @@ impl Ui {
             && self.state.prefs.auto_open_next_directory
             && (!is_archive || self.state.prefs.auto_open_next_archive)
         {
-            self.open_sibling_directory(1);
+            opened = self.open_sibling_directory(1);
+        }
+        if opened {
+            self.clear_current_position();
         }
     }
 
     /// At the start of the first page: open the previous archive (if enabled),
     /// else fall back to the previous directory (if enabled).
+    ///
+    /// Same as next_book: a successful transition clears the current book's
+    /// saved position (it was finished by moving on).
     fn previous_book(&mut self) {
         let is_archive = self
             .state
@@ -2214,8 +2224,24 @@ impl Ui {
             && self.state.prefs.auto_open_next_directory
             && (!is_archive || self.state.prefs.auto_open_next_archive)
         {
-            self.open_sibling_directory(-1);
+            opened = self.open_sibling_directory(-1);
         }
+        if opened {
+            self.clear_current_position();
+        }
+    }
+
+    /// Reset the current book's saved reading position (last-read DB + prefs),
+    /// so a finished book does not prompt to resume from its last page.
+    fn clear_current_position(&mut self) {
+        let Some(path) = self.state.path.clone() else {
+            return;
+        };
+        log::info!("clearing saved position for finished book: {}", path.display());
+        crate::lastread::LastReadDb::set(&path, 1);
+        self.state.prefs.path_to_last_file = path.to_string_lossy().into_owned();
+        self.state.prefs.page_of_last_file = 1;
+        self.state.prefs.save();
     }
 
     fn open_next_in_dir(&mut self) -> bool {
