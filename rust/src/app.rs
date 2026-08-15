@@ -3812,16 +3812,53 @@ mod nav_tests {
     }
 }
 
-/// Apply the chosen GTK theme (system / dark / light) by toggling CSS
-/// classes on the application window. Adwaita (and most GTK4 themes) honour
-/// the CSS `color-scheme` property and switch to their dark/light variant.
+/// The CSS property name for color schemes varies across GTK4 versions
+/// (newer builds: `gtk-color-scheme`; older: `color-scheme`). Probe once at
+/// runtime by parsing a tiny stylesheet with each candidate and counting
+/// parsing errors. Returns the working property ("" if none do — very old
+/// GTK4, where we fall back to the settings property).
+fn gtk_color_scheme_property() -> &'static str {
+    static PROP: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
+    PROP.get_or_init(|| {
+        for candidate in ["gtk-color-scheme", "color-scheme"] {
+            let provider = gtk::CssProvider::new();
+            let errs = std::rc::Rc::new(std::cell::Cell::new(0usize));
+            let errs2 = errs.clone();
+            provider.connect_parsing_error(move |_, _, _| {
+                errs2.set(errs2.get() + 1);
+            });
+            provider.load_from_string(&format!(".probe {{ {candidate}: dark; }}"));
+            if errs.get() == 0 {
+                return candidate;
+            }
+        }
+        ""
+    })
+}
+
+/// Apply the chosen GTK theme (system / dark / light):
+/// 1. the CSS `color-scheme` property (probed per GTK4 version) toggles the
+///    Adwaita dark/light variant, and
+/// 2. the legacy `gtk-application-prefer-dark-theme` setting as a portable
+///    fallback for dark on old GTK4.
 fn apply_gtk_theme(window: &gtk::ApplicationWindow, prefs: &Prefs) {
-    // The provider is registered once with both rules; the window class
-    // selects which one applies.
-    let css = ".mcomix-theme-dark { color-scheme: dark; } \
-               .mcomix-theme-light { color-scheme: light; }";
+    // Portable hint (works on all GTK4): force dark when requested.
+    if let Some(settings) = gtk::Settings::default() {
+        settings.set_gtk_application_prefer_dark_theme(prefs.gtk_theme == "dark");
+    }
+    // CSS color-scheme (GTK 4.10+): probe the correct property name.
+    let prop = gtk_color_scheme_property();
+    if prop.is_empty() {
+        // Very old GTK4 without a CSS color-scheme property: nothing more to
+        // do (prefer-dark above still covers the dark case).
+        return;
+    }
+    let css = format!(
+        ".mcomix-theme-dark {{ {prop}: dark; }} \
+         .mcomix-theme-light {{ {prop}: light; }}"
+    );
     let provider = gtk::CssProvider::new();
-    provider.load_from_string(css);
+    provider.load_from_string(&css);
     if let Some(display) = gdk::Display::default() {
         gtk::StyleContext::add_provider_for_display(
             &display,
