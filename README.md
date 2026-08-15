@@ -139,6 +139,22 @@ the gate.
    version and regenerate the checksums with `updkgsums` (the hashes change
    with every release).
 
+### Running the tests locally (offline)
+
+The same test suite that CI runs can be executed on your machine with no
+network access (after the dependencies are fetched once):
+
+```bash
+cd rust
+cargo test          # unit + integration tests
+cargo build         # debug binary
+```
+
+The only requirement is the GTK4 development toolchain (see "Building from
+source"); the test fixtures live in the repository (`test/files/`), so
+nothing is downloaded at test time. Optional archive backends (`unrar`,
+`7z`, `mutool`) are not needed for the test suite.
+
 ### Running the packaging scripts locally
 
 | Artifact | Command (from `rust/`) |
