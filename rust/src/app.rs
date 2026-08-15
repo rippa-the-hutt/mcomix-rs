@@ -1221,10 +1221,12 @@ impl Ui {
             .take(self.hidden_count)
             .map(|(l, b, _)| (l.clone(), b.clone()))
             .collect();
+        let popover = self.more_popover.clone();
         for (label, btn) in &items {
             // Toggle buttons (Lens, Manga, Double page, ...) become toggle
             // rows that mirror the underlying active state, so the menu shows
-            // the same "pressed" colour as the toolbar button.
+            // the same "pressed" colour as the toolbar button. They only flip
+            // a mode, so the menu stays open.
             if let Ok(toggle) = btn.clone().downcast::<gtk::ToggleButton>() {
                 let row = gtk::ToggleButton::with_label(label);
                 row.set_halign(gtk::Align::Fill);
@@ -1239,10 +1241,14 @@ impl Ui {
                 });
                 boxv.append(&row);
             } else {
+                // Plain rows open a dialog/window (Preferences, About,
+                // Library, ...): close the overflow menu when activated.
                 let row = gtk::Button::with_label(label);
                 row.set_halign(gtk::Align::Fill);
                 let b = btn.clone();
+                let pop = popover.clone();
                 row.connect_clicked(move |_| {
+                    pop.popdown();
                     b.emit_clicked();
                 });
                 boxv.append(&row);
