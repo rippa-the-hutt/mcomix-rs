@@ -161,8 +161,9 @@ impl Default for Prefs {
             keep_transformation: false,
             double_step_in_double_page_mode: true,
             virtual_double_page_for_fitting_images: 3, // SHOW_DOUBLE_AS_ONE_TITLE|WIDE
-            bg_color: [5000, 5000, 5000],
-            thumb_bg_color: [5000, 5000, 5000],
+            // Dark grey (0x202020) instead of the old reddish default.
+            bg_color: [0x2020, 0x2020, 0x2020],
+            thumb_bg_color: [0x2020, 0x2020, 0x2020],
             smart_bg: false,
             smart_thumb_bg: false,
             thumbnail_bg_uses_main_color: false,

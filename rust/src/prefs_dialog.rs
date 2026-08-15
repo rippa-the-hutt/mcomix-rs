@@ -148,7 +148,7 @@ impl PrefsForm {
             // 'dialog' property, leaving the button without a dialog and
             // crashing with 'GTK_IS_COLOR_DIALOG' when clicked.
             bg_color: gtk::ColorDialogButton::new(Some(gtk::ColorDialog::new())),
-            thumb_bg_color: gtk::ColorDialogButton::new(None),
+            thumb_bg_color: gtk::ColorDialogButton::new(Some(gtk::ColorDialog::new())),
             show_page_numbers: check("Show page numbers on thumbnails", p.show_page_numbers_on_thumbnails),
             thumbnail_size: spin(p.thumbnail_size as f64, 20.0, 500.0, 10.0, 0),
             checkered_bg: check("Checkered background for transparent images", p.checkered_bg_for_transparent_images),
