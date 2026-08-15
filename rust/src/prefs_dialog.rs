@@ -90,6 +90,7 @@ fn dropdown(labels: &[&str], selected: u32) -> gtk::DropDown {
 struct PrefsForm {
     // Appearance
     language: gtk::DropDown,
+    gtk_theme: gtk::DropDown,
     bg_color: gtk::ColorDialogButton,
     thumb_bg_color: gtk::ColorDialogButton,
     show_page_numbers: gtk::CheckButton,
@@ -135,8 +136,14 @@ impl PrefsForm {
             .position(|l| *l == p.language)
             .map(|i| i + 1)
             .unwrap_or(0);
+        let theme_idx = match p.gtk_theme.as_str() {
+            "dark" => 1,
+            "light" => 2,
+            _ => 0,
+        };
         PrefsForm {
             language: dropdown(&lang_labels, lang_idx as u32),
+            gtk_theme: dropdown(&["System", "Dark", "Light"], theme_idx),
             bg_color: gtk::ColorDialogButton::new(None),
             thumb_bg_color: gtk::ColorDialogButton::new(None),
             show_page_numbers: check("Show page numbers on thumbnails", p.show_page_numbers_on_thumbnails),
@@ -194,6 +201,12 @@ impl PrefsForm {
             &grid,
             &crate::i18n::tr("Language (needs restart):"),
             Some(&self.language),
+            &mut row,
+        );
+        add_row(
+            &grid,
+            &crate::i18n::tr("GTK theme:"),
+            Some(&self.gtk_theme),
             &mut row,
         );
         {
@@ -282,6 +295,11 @@ impl PrefsForm {
             "auto".to_string()
         } else {
             crate::i18n::available_languages()[(lang_sel - 1) as usize].to_string()
+        };
+        p.gtk_theme = match self.gtk_theme.selected() {
+            1 => "dark".to_string(),
+            2 => "light".to_string(),
+            _ => "system".to_string(),
         };
         p.bg_color = prefs_from_rgba(&self.bg_color.rgba());
         p.thumb_bg_color = prefs_from_rgba(&self.thumb_bg_color.rgba());

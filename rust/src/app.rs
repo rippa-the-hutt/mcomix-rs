@@ -566,6 +566,7 @@ impl Ui {
         window.set_child(Some(&vbox));
 
         apply_background_css(&state.prefs);
+        apply_gtk_theme(&window, &state.prefs);
 
         let ui = Rc::new(RefCell::new(Ui {
             window,
@@ -1998,6 +1999,7 @@ impl Ui {
         self.zoom_dropdown
             .set_selected(self.state.prefs.zoom_mode.clamp(0, 4) as u32);
         apply_background_css(&self.state.prefs);
+        apply_gtk_theme(&self.window, &self.state.prefs);
         let policy = if self.state.prefs.show_scrollbar {
             gtk::PolicyType::Automatic
         } else {
@@ -3807,5 +3809,31 @@ mod nav_tests {
         assert_eq!(first_or_last_matching(&structure().join("CC"), false, 1), None);
         // Empty directory.
         assert_eq!(first_or_last_matching(&structure().join("Empty"), true, 1), None);
+    }
+}
+
+/// Apply the chosen GTK theme (system / dark / light) by toggling CSS
+/// classes on the application window. Adwaita (and most GTK4 themes) honour
+/// the CSS `color-scheme` property and switch to their dark/light variant.
+fn apply_gtk_theme(window: &gtk::ApplicationWindow, prefs: &Prefs) {
+    // The provider is registered once with both rules; the window class
+    // selects which one applies.
+    let css = ".mcomix-theme-dark { color-scheme: dark; } \
+               .mcomix-theme-light { color-scheme: light; }";
+    let provider = gtk::CssProvider::new();
+    provider.load_from_string(css);
+    if let Some(display) = gdk::Display::default() {
+        gtk::StyleContext::add_provider_for_display(
+            &display,
+            &provider,
+            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+        );
+    }
+    window.remove_css_class("mcomix-theme-dark");
+    window.remove_css_class("mcomix-theme-light");
+    match prefs.gtk_theme.as_str() {
+        "dark" => window.add_css_class("mcomix-theme-dark"),
+        "light" => window.add_css_class("mcomix-theme-light"),
+        _ => {} // system: leave the OS default
     }
 }

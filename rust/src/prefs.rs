@@ -133,6 +133,8 @@ pub struct Prefs {
     pub lens_size: u32,
     pub lens_magnification: u32,
     pub language: String,
+    /// GTK theme: "system" (follow the OS), "dark", or "light".
+    pub gtk_theme: String,
     pub ask_resume_from_last_page: bool,
 
     // Window geometry
@@ -209,6 +211,7 @@ impl Default for Prefs {
             lens_size: 200,
             lens_magnification: 2,
             language: "auto".to_string(),
+            gtk_theme: "system".to_string(),
             ask_resume_from_last_page: true,
             window_x: 0,
             window_y: 0,
@@ -310,6 +313,7 @@ impl Prefs {
         ov!(lens_size);
         ov!(lens_magnification);
         ov!(language);
+        ov!(gtk_theme);
         ov!(ask_resume_from_last_page);
         ov!(number_of_key_presses_before_page_turn);
         ov!(window_x);
