@@ -1828,7 +1828,13 @@ impl Ui {
         self.state.displayed = vec![(0, 0, 0, 0), (0, 0, 0, 0)];
         for (slot, &i) in order.iter().enumerate() {
             let pic = &self.pics[i];
-            match (zoomed.get(slot), self.state.cache.get(&i).cloned()) {
+            // The cache is keyed by PAGE index; `i` here is the display slot.
+            let page_idx = if i == 0 {
+                self.state.page
+            } else {
+                (self.state.page + 1).min(n - 1)
+            };
+            match (zoomed.get(slot), self.state.cache.get(&page_idx).cloned()) {
                 (Some((w, h)), Some((sw, sh, rgba))) => {
                     // Build a display texture at the zoomed size so the
                     // Picture's natural size matches (otherwise the full-res
