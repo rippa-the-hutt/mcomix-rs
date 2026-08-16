@@ -54,3 +54,9 @@ assets = [
     ["packaging/linux/mcomix-rs.xml", "usr/share/mime/packages/", "644"],
     ["packaging/linux/icons/**/*.png", "usr/share/icons/hicolor/", "644"],
 ]
+
+# Debug builds are used interactively; optimize dependencies (image resize
+# lives in the image crate) so the debug binary is usable while keeping the
+# project's own code mostly unoptimized for fast iteration.
+[profile.dev.package."*"]
+opt-level = 2
