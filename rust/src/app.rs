@@ -98,8 +98,10 @@ pub struct AppState {
     pub flip_v: bool,
     pub zoom: ZoomModel,
     pub prefs: Prefs,
-    /// Textures of the (up to two) visible pages.
-    pub textures: Vec<Option<gdk::Texture>>,
+    /// Scaled display textures of the visible pages: (page index, display w,
+    /// display h, texture). Rebuilt only when the zoomed size changes, so
+    /// redraws are cheap (texture clones are refcounted).
+    pub textures: Vec<Option<(usize, u32, u32, gdk::Texture)>>,
     /// Full-resolution sizes of the visible pages (after rotation).
     pub sizes: Vec<(u32, u32)>,
     /// Generation counter for the thumbnail worker; stale results are dropped.
@@ -1669,10 +1671,14 @@ impl Ui {
         for p in res.pages {
             let idx = p.idx;
             let (w, h) = (p.w, p.h);
-            // Keep the raw pixels for the lens (cropping needs them).
-            if self.state.lens_enabled && idx >= self.state.page && idx - self.state.page < 2 {
+            // Record the full-res size (redraw derives the zoomed display
+            // size from it) and keep raw pixels for the lens.
+            if idx >= self.state.page && idx - self.state.page < 2 {
                 let slot = idx - self.state.page;
-                self.state.lens_source[slot] = Some((w, h, p.rgba.clone()));
+                self.state.sizes[slot] = (w, h);
+                if self.state.lens_enabled {
+                    self.state.lens_source[slot] = Some((w, h, p.rgba.clone()));
+                }
             }
             // Store in the cache; the display texture is built (scaled) in
             // redraw so the Picture's natural size matches the zoomed size.
@@ -1826,51 +1832,74 @@ impl Ui {
         let mut total_h = 0.0_f64;
         let mut offset_x = 0.0_f64;
         self.state.displayed = vec![(0, 0, 0, 0), (0, 0, 0, 0)];
+
+        // Phase 1: compute/refresh the scaled display textures. Heavy work
+        // (resize + upload) only happens when the zoomed size changed; the
+        // cache holds full-res RGBA and textures are refcounted clones.
+        let mut disp: Vec<(gdk::Texture, u32, u32)> = Vec::with_capacity(order.len());
         for (slot, &i) in order.iter().enumerate() {
-            let pic = &self.pics[i];
             // The cache is keyed by PAGE index; `i` here is the display slot.
             let page_idx = if i == 0 {
                 self.state.page
             } else {
                 (self.state.page + 1).min(n - 1)
             };
-            match (zoomed.get(slot), self.state.cache.get(&page_idx).cloned()) {
-                (Some((w, h)), Some((sw, sh, rgba))) => {
-                    // Build a display texture at the zoomed size so the
-                    // Picture's natural size matches (otherwise the full-res
-                    // paintable overflows and the page sticks to the left).
-                    let tex = if sw == *w && sh == *h {
-                        image_loader::texture_from_rgba(&image::RgbaImage::from_raw(sw, sh, rgba).unwrap_or_default())
-                    } else {
-                        if let Some(img) = image::RgbaImage::from_raw(sw, sh, rgba) {
-                            let scaled = image::imageops::resize(
-                                &img,
-                                *w,
-                                *h,
-                                image::imageops::FilterType::Triangle,
-                            );
-                            image_loader::texture_from_rgba(&scaled)
-                        } else {
-                            image_loader::texture_from_rgba(&image::RgbaImage::new(*w, *h))
-                        }
-                    };
-                    pic.set_paintable(Some(&tex));
-                    pic.set_size_request(*w as i32, *h as i32);
-                    self.content.append(pic);
-                    self.state.displayed[i] = (
-                        offset_x as i32,
-                        0,
-                        *w as i32,
-                        *h as i32,
-                    );
-                    offset_x += *w as f64;
-                    total_w += *w as f64;
-                    total_h = total_h.max(*h as f64);
-                }
-                _ => {
-                    pic.set_paintable(None::<&gdk::Texture>);
+            let Some((w, h)) = zoomed.get(slot).copied() else {
+                disp.push((image_loader::texture_from_rgba(&image::RgbaImage::new(1, 1)), 1, 1));
+                continue;
+            };
+            let reuse = self.state.textures[slot]
+                .as_ref()
+                .map(|(p, tw, th, _)| *p == page_idx && *tw == w && *th == h)
+                .unwrap_or(false);
+            if reuse {
+                if let Some((_, _, _, tex)) = self.state.textures[slot].as_ref() {
+                    disp.push((tex.clone(), w, h));
+                    continue;
                 }
             }
+            // Need (re)build: read full-res from the cache and scale.
+            let built = if let Some((sw, sh, rgba)) = self.state.cache.get(&page_idx) {
+                let (sw, sh) = (*sw, *sh);
+                let tex = if sw == w && sh == h {
+                    image::RgbaImage::from_raw(sw, sh, rgba.clone())
+                        .map(|img| image_loader::texture_from_rgba(&img))
+                        .unwrap_or_else(|| {
+                            image_loader::texture_from_rgba(&image::RgbaImage::new(w, h))
+                        })
+                } else if let Some(img) = image::RgbaImage::from_raw(sw, sh, rgba.clone()) {
+                    let scaled =
+                        image::imageops::resize(&img, w, h, image::imageops::FilterType::Triangle);
+                    image_loader::texture_from_rgba(&scaled)
+                } else {
+                    image_loader::texture_from_rgba(&image::RgbaImage::new(w, h))
+                };
+                Some(tex)
+            } else {
+                None
+            };
+            match built {
+                Some(tex) => {
+                    self.state.textures[slot] = Some((page_idx, w, h, tex.clone()));
+                    disp.push((tex, w, h));
+                }
+                None => {
+                    disp.push((image_loader::texture_from_rgba(&image::RgbaImage::new(1, 1)), 1, 1));
+                }
+            }
+        }
+
+        // Phase 2: apply to the widgets (no self borrows held).
+        for (slot, &i) in order.iter().enumerate() {
+            let pic = &self.pics[i];
+            let (tex, w, h) = &disp[slot];
+            pic.set_paintable(Some(tex));
+            pic.set_size_request(*w as i32, *h as i32);
+            self.content.append(pic);
+            self.state.displayed[i] = (offset_x as i32, 0, *w as i32, *h as i32);
+            offset_x += *w as f64;
+            total_w += *w as f64;
+            total_h = total_h.max(*h as f64);
         }
         if double {
             offset_x += 2.0; // spacing between pages
@@ -2096,10 +2125,17 @@ impl Ui {
             visible.push((idx + 1).min(n - 1));
         }
         if visible.iter().all(|i| self.state.cache.contains(i)) {
-            // The display textures are derived from the cache at the zoomed
-            // size during redraw; just clear and redraw.
-            self.state.textures = vec![None, None];
-            self.state.sizes = vec![(0, 0), (0, 0)];
+            // Populate sizes from the cache (redraw derives the zoomed
+            // display textures from it).
+            let mut textures = vec![None, None];
+            let mut sizes = vec![(0, 0), (0, 0)];
+            for (slot, &page_idx) in visible.iter().enumerate() {
+                if let Some((w, h, _)) = self.state.cache.get(&page_idx).cloned() {
+                    sizes[slot] = (w, h);
+                }
+            }
+            self.state.textures = textures;
+            self.state.sizes = sizes;
             self.update_status();
             self.redraw_force();
             self.scroll_to_destination(dest);
