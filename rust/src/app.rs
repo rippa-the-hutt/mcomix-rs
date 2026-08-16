@@ -56,6 +56,15 @@ struct PageCmd {
     pgen: u64,
     /// True for display requests, false for background prefetch.
     display: bool,
+    /// Viewport + zoom settings, so the worker can pre-scale display
+    /// requests to the target size (it knows the page's full dimensions).
+    viewport: (f64, f64),
+    fit_mode: i32,
+    scale_up: bool,
+    user_zoom_log: i32,
+    fit_to_size_mode: i32,
+    fit_to_size_px: u32,
+    double_page: bool,
     path: PathBuf,
     pages: Vec<String>,
     /// Page indices to decode.
@@ -68,12 +77,17 @@ struct PageCmd {
     auto_contrast: bool,
 }
 
-/// One decoded page, ready to be turned into a texture on the main thread.
+/// One decoded page. `w/h/rgba` are the display-sized image (pre-scaled in
+/// the worker for display requests); `full_w/full_h/full_rgba` are the
+/// full-resolution pixels (kept for the cache and the magnifying lens).
 struct DecodedPage {
     idx: usize,
     w: u32,
     h: u32,
     rgba: Vec<u8>,
+    full_w: u32,
+    full_h: u32,
+    full_rgba: Vec<u8>,
 }
 
 struct PageResult {
@@ -98,8 +112,10 @@ pub struct AppState {
     pub flip_v: bool,
     pub zoom: ZoomModel,
     pub prefs: Prefs,
-    /// Textures of the (up to two) visible pages.
-    pub textures: Vec<Option<gdk::Texture>>,
+    /// Scaled display textures of the visible pages: (page index, display w,
+    /// display h, texture). Rebuilt only when the zoomed size changes, so
+    /// redraws are cheap (texture clones are refcounted).
+    pub textures: Vec<Option<(usize, u32, u32, gdk::Texture)>>,
     /// Full-resolution sizes of the visible pages (after rotation).
     pub sizes: Vec<(u32, u32)>,
     /// Generation counter for the thumbnail worker; stale results are dropped.
@@ -146,7 +162,9 @@ pub struct AppState {
     /// opening page 1 behind the dialog doesn't clobber the saved page.
     pub suppress_position: bool,
     /// LRU cache of decoded page textures (mirrors `max pages to cache`).
-    pub cache: crate::lru::LruCache<usize, (gdk::Texture, u32, u32)>,
+    /// Decoded pages: full-res (w, h, tight RGBA8). Display textures are
+    /// derived from these at the zoomed size on redraw.
+    pub cache: crate::lru::LruCache<usize, (u32, u32, Vec<u8>)>,
     /// Pages to prefetch in the background, in priority order.
     pub prefetch_queue: std::collections::VecDeque<usize>,
     /// True while a prefetch decode is in flight.
@@ -679,6 +697,7 @@ impl Ui {
                     while let Ok(cmd) = thumb_cmd_rx.try_recv() {
                         handle_cmd!(cmd);
                     }
+                    let start = std::time::Instant::now();
 
                     if paused {
                         // Wait for a resume command and handle it directly.
@@ -771,12 +790,55 @@ impl Ui {
                                             cmd.contrast,
                                             cmd.auto_contrast,
                                         );
-                                        let (w, h) = img.dimensions();
+                                        let (full_w, full_h) = img.dimensions();
+                                        // Full-res pixels: kept for the cache
+                                        // (revisits, zoom) and the lens.
+                                        let full_rgba = img.as_raw().clone();
+                                        // Pre-scale to the display size in the
+                                        // worker (off the UI thread) so page
+                                        // turns never resize on the main thread.
+                                        let target = if cmd.display
+                                            && cmd.viewport.0 > 0.0
+                                            && cmd.viewport.1 > 0.0
+                                        {
+                                            let zm = crate::zoom::ZoomModel {
+                                                fit_mode: cmd.fit_mode,
+                                                scale_up: cmd.scale_up,
+                                                user_zoom_log: cmd.user_zoom_log,
+                                            };
+                                            zm.zoomed_sizes(
+                                                &[(full_w, full_h)],
+                                                cmd.viewport,
+                                                2.0,
+                                                cmd.double_page,
+                                                cmd.fit_to_size_mode,
+                                                cmd.fit_to_size_px,
+                                            )
+                                            .first()
+                                            .copied()
+                                        } else {
+                                            None
+                                        };
+                                        let (dw, dh, rgba) = match target {
+                                            Some((tw, th)) if tw < full_w || th < full_h => {
+                                                let scaled = image::imageops::thumbnail(
+                                                    &img,
+                                                    tw.max(1),
+                                                    th.max(1),
+                                                );
+                                                let (w2, h2) = scaled.dimensions();
+                                                (w2, h2, scaled.into_raw())
+                                            }
+                                            _ => (full_w, full_h, img.into_raw()),
+                                        };
                                         out.push(DecodedPage {
                                             idx,
-                                            w,
-                                            h,
-                                            rgba: img.into_raw(),
+                                            w: dw,
+                                            h: dh,
+                                            rgba,
+                                            full_w,
+                                            full_h,
+                                            full_rgba,
                                         });
                                     }
                                 }
@@ -1604,11 +1666,21 @@ impl Ui {
         if display {
             self.state.page_req += 1;
         }
+        let alloc = self.scrolled.allocation();
+        let vw = (alloc.width() as f64 - 4.0).max(50.0);
+        let vh = (alloc.height() as f64 - 4.0).max(50.0);
         let cmd = PageCmd {
             req: self.state.page_req,
             gen: self.state.page_gen,
             pgen: self.state.prefetch_gen,
             display,
+            viewport: (vw, vh),
+            fit_mode: self.state.zoom.fit_mode,
+            scale_up: self.state.zoom.scale_up,
+            user_zoom_log: self.state.zoom.user_zoom_log,
+            fit_to_size_mode: self.state.prefs.fit_to_size_mode,
+            fit_to_size_px: self.state.prefs.fit_to_size_px,
+            double_page: self.state.double_page,
             path,
             pages,
             indices,
@@ -1666,20 +1738,20 @@ impl Ui {
         self.state.lens_last_crop = None;
         for p in res.pages {
             let idx = p.idx;
-            let (w, h) = (p.w, p.h);
-            let rgba = p.rgba.clone();
-            // Map the page index back to its display slot (0 or 1).
-            if let Some((tex, tw, th)) = self.cache_decoded(p) {
-                if idx >= self.state.page && idx - self.state.page < 2 {
-                    let slot = idx - self.state.page;
-                    self.state.textures[slot] = Some(tex);
-                    self.state.sizes[slot] = (tw, th);
-                    // Keep the raw pixels for the lens (cropping needs them).
-                    if self.state.lens_enabled {
-                        self.state.lens_source[slot] = Some((w, h, rgba));
-                    }
+            // Record the display size and pre-built display texture.
+            if idx >= self.state.page && idx - self.state.page < 2 {
+                let slot = idx - self.state.page;
+                self.state.sizes[slot] = (p.w, p.h);
+                if let Some(img) = image::RgbaImage::from_raw(p.w, p.h, p.rgba.clone()) {
+                    let tex = image_loader::texture_from_rgba(&img);
+                    self.state.textures[slot] = Some((idx, p.w, p.h, tex));
+                }
+                if self.state.lens_enabled {
+                    self.state.lens_source[slot] = Some((p.full_w, p.full_h, p.full_rgba.clone()));
                 }
             }
+            // Store full-res in the cache (revisits, zoom).
+            self.cache_decoded(p);
         }
         self.redraw_force();
         if let Some(dest) = self.state.page_dest.take() {
@@ -1692,17 +1764,14 @@ impl Ui {
         self.do_caching();
     }
 
-    /// Turn a decoded page into a texture and store it in the LRU cache.
-    /// Returns `None` if the page could not be decoded (nothing is cached).
-    fn cache_decoded(&mut self, p: DecodedPage) -> Option<(gdk::Texture, u32, u32)> {
-        let (w, h) = (p.w, p.h);
-        let img = image::RgbaImage::from_raw(p.w, p.h, p.rgba)?;
-        let tex = image_loader::texture_from_rgba(&img);
+    /// Store a decoded page's full-res RGBA in the LRU cache (display
+    /// textures are derived from it on zoom changes). Returns `None` if the
+    /// page could not be decoded (nothing is cached).
+    fn cache_decoded(&mut self, p: DecodedPage) -> Option<()> {
+        let (w, h) = (p.full_w, p.full_h);
         let bytes = (w as usize) * (h as usize) * 4;
-        self.state
-            .cache
-            .put(p.idx, (tex.clone(), w, h), bytes);
-        Some((tex, w, h))
+        self.state.cache.put(p.idx, (w, h, p.full_rgba), bytes);
+        Some(())
     }
 
     /// Drop all cached textures and pending prefetches (used when the decoded
@@ -1832,27 +1901,75 @@ impl Ui {
         let mut total_h = 0.0_f64;
         let mut offset_x = 0.0_f64;
         self.state.displayed = vec![(0, 0, 0, 0), (0, 0, 0, 0)];
+
+        // Phase 1: resolve the display texture per slot. The worker already
+        // pre-scaled it to the current zoomed size for the freshly decoded
+        // page; only zoom changes (or cache misses) fall back to scaling the
+        // full-res image here on the UI thread.
+        let mut disp: Vec<(gdk::Texture, u32, u32)> = Vec::with_capacity(order.len());
         for (slot, &i) in order.iter().enumerate() {
-            let pic = &self.pics[i];
-            match (self.state.textures[i].as_ref(), zoomed.get(slot)) {
-                (Some(tex), Some((w, h))) => {
-                    pic.set_paintable(Some(tex));
-                    pic.set_size_request(*w as i32, *h as i32);
-                    self.content.append(pic);
-                    self.state.displayed[i] = (
-                        offset_x as i32,
-                        0,
-                        *w as i32,
-                        *h as i32,
-                    );
-                    offset_x += *w as f64;
-                    total_w += *w as f64;
-                    total_h = total_h.max(*h as f64);
-                }
-                _ => {
-                    pic.set_paintable(None::<&gdk::Texture>);
+            // The cache is keyed by PAGE index; `i` here is the display slot.
+            let page_idx = if i == 0 {
+                self.state.page
+            } else {
+                (self.state.page + 1).min(n - 1)
+            };
+            let Some((w, h)) = zoomed.get(slot).copied() else {
+                disp.push((image_loader::texture_from_rgba(&image::RgbaImage::new(1, 1)), 1, 1));
+                continue;
+            };
+            let reuse = self.state.textures[slot]
+                .as_ref()
+                .map(|(p, tw, th, _)| *p == page_idx && *tw == w && *th == h)
+                .unwrap_or(false);
+            if reuse {
+                if let Some((_, _, _, tex)) = self.state.textures[slot].as_ref() {
+                    disp.push((tex.clone(), w, h));
+                    continue;
                 }
             }
+            // Zoom changed or cache miss: scale the full-res image here.
+            let built = if let Some((sw, sh, rgba)) = self.state.cache.get(&page_idx) {
+                let (sw, sh) = (*sw, *sh);
+                let tex = if sw == w && sh == h {
+                    image::RgbaImage::from_raw(sw, sh, rgba.clone())
+                        .map(|img| image_loader::texture_from_rgba(&img))
+                        .unwrap_or_else(|| {
+                            image_loader::texture_from_rgba(&image::RgbaImage::new(w, h))
+                        })
+                } else if let Some(img) = image::RgbaImage::from_raw(sw, sh, rgba.clone()) {
+                    let scaled =
+                        image::imageops::thumbnail(&img, w.max(1), h.max(1));
+                    image_loader::texture_from_rgba(&scaled)
+                } else {
+                    image_loader::texture_from_rgba(&image::RgbaImage::new(w, h))
+                };
+                Some(tex)
+            } else {
+                None
+            };
+            match built {
+                Some(tex) => {
+                    self.state.textures[slot] = Some((page_idx, w, h, tex.clone()));
+                    disp.push((tex, w, h));
+                }
+                None => {
+                    disp.push((image_loader::texture_from_rgba(&image::RgbaImage::new(1, 1)), 1, 1));
+                }
+            }
+        }
+
+        // Phase 2: apply to the widgets (no self borrows held).
+        for (slot, &i) in order.iter().enumerate() {
+            let pic = &self.pics[i];
+            let (tex, w, h) = &disp[slot];
+            pic.set_paintable(Some(tex));
+            pic.set_size_request(*w as i32, *h as i32);
+            self.content.append(pic);
+            self.state.displayed[i] = (offset_x as i32, 0, *w as i32, *h as i32);
+            offset_x += *w as f64;
+            total_w += *w as f64;
+            total_h = total_h.max(*h as f64);
         }
         if double {
             offset_x += 2.0; // spacing between pages
@@ -2078,11 +2195,12 @@ impl Ui {
             visible.push((idx + 1).min(n - 1));
         }
         if visible.iter().all(|i| self.state.cache.contains(i)) {
+            // Populate sizes from the cache (redraw derives the zoomed
+            // display textures from it).
             let mut textures = vec![None, None];
             let mut sizes = vec![(0, 0), (0, 0)];
-            for (slot, &i) in visible.iter().enumerate() {
-                if let Some((tex, w, h)) = self.state.cache.get(&i).cloned() {
-                    textures[slot] = Some(tex);
+            for (slot, &page_idx) in visible.iter().enumerate() {
+                if let Some((w, h, _)) = self.state.cache.get(&page_idx).cloned() {
                     sizes[slot] = (w, h);
                 }
             }
