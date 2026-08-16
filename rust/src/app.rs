@@ -56,6 +56,15 @@ struct PageCmd {
     pgen: u64,
     /// True for display requests, false for background prefetch.
     display: bool,
+    /// Viewport + zoom settings, so the worker can pre-scale display
+    /// requests to the target size (it knows the page's full dimensions).
+    viewport: (f64, f64),
+    fit_mode: i32,
+    scale_up: bool,
+    user_zoom_log: i32,
+    fit_to_size_mode: i32,
+    fit_to_size_px: u32,
+    double_page: bool,
     path: PathBuf,
     pages: Vec<String>,
     /// Page indices to decode.
@@ -68,12 +77,17 @@ struct PageCmd {
     auto_contrast: bool,
 }
 
-/// One decoded page, ready to be turned into a texture on the main thread.
+/// One decoded page. `w/h/rgba` are the display-sized image (pre-scaled in
+/// the worker for display requests); `full_w/full_h/full_rgba` are the
+/// full-resolution pixels (kept for the cache and the magnifying lens).
 struct DecodedPage {
     idx: usize,
     w: u32,
     h: u32,
     rgba: Vec<u8>,
+    full_w: u32,
+    full_h: u32,
+    full_rgba: Vec<u8>,
 }
 
 struct PageResult {
@@ -683,6 +697,7 @@ impl Ui {
                     while let Ok(cmd) = thumb_cmd_rx.try_recv() {
                         handle_cmd!(cmd);
                     }
+                    let start = std::time::Instant::now();
 
                     if paused {
                         // Wait for a resume command and handle it directly.
@@ -775,12 +790,55 @@ impl Ui {
                                             cmd.contrast,
                                             cmd.auto_contrast,
                                         );
-                                        let (w, h) = img.dimensions();
+                                        let (full_w, full_h) = img.dimensions();
+                                        // Full-res pixels: kept for the cache
+                                        // (revisits, zoom) and the lens.
+                                        let full_rgba = img.as_raw().clone();
+                                        // Pre-scale to the display size in the
+                                        // worker (off the UI thread) so page
+                                        // turns never resize on the main thread.
+                                        let target = if cmd.display
+                                            && cmd.viewport.0 > 0.0
+                                            && cmd.viewport.1 > 0.0
+                                        {
+                                            let zm = crate::zoom::ZoomModel {
+                                                fit_mode: cmd.fit_mode,
+                                                scale_up: cmd.scale_up,
+                                                user_zoom_log: cmd.user_zoom_log,
+                                            };
+                                            zm.zoomed_sizes(
+                                                &[(full_w, full_h)],
+                                                cmd.viewport,
+                                                2.0,
+                                                cmd.double_page,
+                                                cmd.fit_to_size_mode,
+                                                cmd.fit_to_size_px,
+                                            )
+                                            .first()
+                                            .copied()
+                                        } else {
+                                            None
+                                        };
+                                        let (dw, dh, rgba) = match target {
+                                            Some((tw, th)) if tw < full_w || th < full_h => {
+                                                let scaled = image::imageops::thumbnail(
+                                                    &img,
+                                                    tw.max(1),
+                                                    th.max(1),
+                                                );
+                                                let (w2, h2) = scaled.dimensions();
+                                                (w2, h2, scaled.into_raw())
+                                            }
+                                            _ => (full_w, full_h, img.into_raw()),
+                                        };
                                         out.push(DecodedPage {
                                             idx,
-                                            w,
-                                            h,
-                                            rgba: img.into_raw(),
+                                            w: dw,
+                                            h: dh,
+                                            rgba,
+                                            full_w,
+                                            full_h,
+                                            full_rgba,
                                         });
                                     }
                                 }
@@ -1608,11 +1666,21 @@ impl Ui {
         if display {
             self.state.page_req += 1;
         }
+        let alloc = self.scrolled.allocation();
+        let vw = (alloc.width() as f64 - 4.0).max(50.0);
+        let vh = (alloc.height() as f64 - 4.0).max(50.0);
         let cmd = PageCmd {
             req: self.state.page_req,
             gen: self.state.page_gen,
             pgen: self.state.prefetch_gen,
             display,
+            viewport: (vw, vh),
+            fit_mode: self.state.zoom.fit_mode,
+            scale_up: self.state.zoom.scale_up,
+            user_zoom_log: self.state.zoom.user_zoom_log,
+            fit_to_size_mode: self.state.prefs.fit_to_size_mode,
+            fit_to_size_px: self.state.prefs.fit_to_size_px,
+            double_page: self.state.double_page,
             path,
             pages,
             indices,
@@ -1670,18 +1738,19 @@ impl Ui {
         self.state.lens_last_crop = None;
         for p in res.pages {
             let idx = p.idx;
-            let (w, h) = (p.w, p.h);
-            // Record the full-res size (redraw derives the zoomed display
-            // size from it) and keep raw pixels for the lens.
+            // Record the display size and pre-built display texture.
             if idx >= self.state.page && idx - self.state.page < 2 {
                 let slot = idx - self.state.page;
-                self.state.sizes[slot] = (w, h);
+                self.state.sizes[slot] = (p.w, p.h);
+                if let Some(img) = image::RgbaImage::from_raw(p.w, p.h, p.rgba.clone()) {
+                    let tex = image_loader::texture_from_rgba(&img);
+                    self.state.textures[slot] = Some((idx, p.w, p.h, tex));
+                }
                 if self.state.lens_enabled {
-                    self.state.lens_source[slot] = Some((w, h, p.rgba.clone()));
+                    self.state.lens_source[slot] = Some((p.full_w, p.full_h, p.full_rgba.clone()));
                 }
             }
-            // Store in the cache; the display texture is built (scaled) in
-            // redraw so the Picture's natural size matches the zoomed size.
+            // Store full-res in the cache (revisits, zoom).
             self.cache_decoded(p);
         }
         self.redraw_force();
@@ -1696,12 +1765,12 @@ impl Ui {
     }
 
     /// Store a decoded page's full-res RGBA in the LRU cache (display
-    /// textures are derived from it at the zoomed size on redraw). Returns
-    /// `None` if the page could not be decoded (nothing is cached).
+    /// textures are derived from it on zoom changes). Returns `None` if the
+    /// page could not be decoded (nothing is cached).
     fn cache_decoded(&mut self, p: DecodedPage) -> Option<()> {
-        let (w, h) = (p.w, p.h);
+        let (w, h) = (p.full_w, p.full_h);
         let bytes = (w as usize) * (h as usize) * 4;
-        self.state.cache.put(p.idx, (w, h, p.rgba), bytes);
+        self.state.cache.put(p.idx, (w, h, p.full_rgba), bytes);
         Some(())
     }
 
@@ -1833,9 +1902,10 @@ impl Ui {
         let mut offset_x = 0.0_f64;
         self.state.displayed = vec![(0, 0, 0, 0), (0, 0, 0, 0)];
 
-        // Phase 1: compute/refresh the scaled display textures. Heavy work
-        // (resize + upload) only happens when the zoomed size changed; the
-        // cache holds full-res RGBA and textures are refcounted clones.
+        // Phase 1: resolve the display texture per slot. The worker already
+        // pre-scaled it to the current zoomed size for the freshly decoded
+        // page; only zoom changes (or cache misses) fall back to scaling the
+        // full-res image here on the UI thread.
         let mut disp: Vec<(gdk::Texture, u32, u32)> = Vec::with_capacity(order.len());
         for (slot, &i) in order.iter().enumerate() {
             // The cache is keyed by PAGE index; `i` here is the display slot.
@@ -1858,7 +1928,7 @@ impl Ui {
                     continue;
                 }
             }
-            // Need (re)build: read full-res from the cache and scale.
+            // Zoom changed or cache miss: scale the full-res image here.
             let built = if let Some((sw, sh, rgba)) = self.state.cache.get(&page_idx) {
                 let (sw, sh) = (*sw, *sh);
                 let tex = if sw == w && sh == h {
@@ -1869,7 +1939,7 @@ impl Ui {
                         })
                 } else if let Some(img) = image::RgbaImage::from_raw(sw, sh, rgba.clone()) {
                     let scaled =
-                        image::imageops::resize(&img, w, h, image::imageops::FilterType::Triangle);
+                        image::imageops::thumbnail(&img, w.max(1), h.max(1));
                     image_loader::texture_from_rgba(&scaled)
                 } else {
                     image_loader::texture_from_rgba(&image::RgbaImage::new(w, h))
