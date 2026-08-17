@@ -1666,9 +1666,19 @@ impl Ui {
         if display {
             self.state.page_req += 1;
         }
-        let alloc = self.scrolled.allocation();
-        let vw = (alloc.width() as f64 - 4.0).max(50.0);
-        let vh = (alloc.height() as f64 - 4.0).max(50.0);
+        // At app start (file-manager launch, Open-with) the scrolled window is
+        // not mapped yet, so its allocation is (1,1): pre-scaling to that
+        // would render a ~50px cover. Fall back to the window's default size
+        // until the real allocation is known.
+        let (vw, vh) = {
+            let a = self.scrolled.allocation();
+            if a.width() > 50 && a.height() > 50 {
+                ((a.width() as f64 - 4.0).max(50.0), (a.height() as f64 - 4.0).max(50.0))
+            } else {
+                let (dw, dh) = self.window.default_size();
+                ((dw as f64 - 4.0).max(50.0), (dh as f64 - 4.0).max(50.0))
+            }
+        };
         let cmd = PageCmd {
             req: self.state.page_req,
             gen: self.state.page_gen,
