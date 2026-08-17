@@ -1748,10 +1748,11 @@ impl Ui {
         self.state.lens_last_crop = None;
         for p in res.pages {
             let idx = p.idx;
-            // Record the display size and pre-built display texture.
+            // Record the FULL-RES size (redraw derives the zoomed display size
+            // from it) and the pre-built display texture.
             if idx >= self.state.page && idx - self.state.page < 2 {
                 let slot = idx - self.state.page;
-                self.state.sizes[slot] = (p.w, p.h);
+                self.state.sizes[slot] = (p.full_w, p.full_h);
                 if let Some(img) = image::RgbaImage::from_raw(p.w, p.h, p.rgba.clone()) {
                     let tex = image_loader::texture_from_rgba(&img);
                     self.state.textures[slot] = Some((idx, p.w, p.h, tex));
