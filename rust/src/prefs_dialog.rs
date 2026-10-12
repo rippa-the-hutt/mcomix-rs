@@ -103,6 +103,7 @@ struct PrefsForm {
     auto_open_next_archive: gtk::CheckButton,
     auto_open_next_directory: gtk::CheckButton,
     double_step: gtk::CheckButton,
+    show_cover_alone: gtk::CheckButton,
     default_double_page: gtk::CheckButton,
     default_manga: gtk::CheckButton,
     // Display
@@ -167,6 +168,10 @@ impl PrefsForm {
             auto_open_next_archive: check("Automatically open the next archive", p.auto_open_next_archive),
             auto_open_next_directory: check("Automatically open the next directory", p.auto_open_next_directory),
             double_step: check("Double step in double page mode", p.double_step_in_double_page_mode),
+            show_cover_alone: check(
+                "Show the first page (cover) alone in double-page mode",
+                p.virtual_double_page_for_fitting_images & crate::app::SHOW_DOUBLE_AS_ONE_TITLE != 0,
+            ),
             default_double_page: check("Use double page mode by default", p.default_double_page),
             default_manga: check("Use manga mode by default", p.default_manga_mode),
             default_fullscreen: check("Use fullscreen by default", p.default_fullscreen),
@@ -239,6 +244,7 @@ impl PrefsForm {
         add_row(&grid, "", Some(&self.auto_open_next_archive), &mut row);
         add_row(&grid, "", Some(&self.auto_open_next_directory), &mut row);
         add_row(&grid, "", Some(&self.double_step), &mut row);
+        add_row(&grid, "", Some(&self.show_cover_alone), &mut row);
         add_row(&grid, "", Some(&self.default_double_page), &mut row);
         add_row(&grid, "", Some(&self.default_manga), &mut row);
         let page = gtk::ScrolledWindow::new();
@@ -313,6 +319,15 @@ impl PrefsForm {
         p.auto_open_next_archive = self.auto_open_next_archive.is_active();
         p.auto_open_next_directory = self.auto_open_next_directory.is_active();
         p.double_step_in_double_page_mode = self.double_step.is_active();
+        // Bit 1 of 'virtual double page for fitting images' = show the cover
+        // alone (mirrors the Python constants).
+        p.virtual_double_page_for_fitting_images =
+            (p.virtual_double_page_for_fitting_images & !crate::app::SHOW_DOUBLE_AS_ONE_TITLE)
+                | if self.show_cover_alone.is_active() {
+                    crate::app::SHOW_DOUBLE_AS_ONE_TITLE
+                } else {
+                    0
+                };
         p.default_double_page = self.default_double_page.is_active();
         p.default_manga_mode = self.default_manga.is_active();
         p.default_fullscreen = self.default_fullscreen.is_active();
