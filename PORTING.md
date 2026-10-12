@@ -50,6 +50,7 @@ rust/
 | `image_tools.py` | `image_loader.rs` | ✅ core; enhancers ⏳ |
 | `zoom.py` | `zoom.rs` | ✅ core |
 | `layout.py` + `scrolling.py` (smart scroll) | `layout.rs` + `app.rs` | ✅ box model (Box/scrolling/layout ported); smart scroll + predefined scroll |
+| double-page spreads (`get_virtual_double_page`) | `app.rs` (`spread_of`, `visual_order`) | ✅ manga order (first page right) + cover-alone offset (`SHOW_DOUBLE_AS_ONE_TITLE`); ⏳ `SHOW_DOUBLE_AS_ONE_WIDE` (wide pages shown alone) |
 | `thumbbar.py`, `thumbnail_tools.py` | `app.rs` + `thumb_cache.rs` | ✅ lazy/windowed generation, gdk-pixbuf scaled decode, on-disk cache, page-decode priority |
 | `slideshow.py` | `app.rs` | ✅ basic |
 | `preferences.py` | `prefs.rs` | ✅ (JSON, same keys) |

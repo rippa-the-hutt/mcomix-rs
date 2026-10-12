@@ -1638,15 +1638,55 @@ impl Ui {
     /// Request an asynchronous decode of the visible page(s). While a decode
     /// is in flight, further requests are coalesced to the newest target, so
     /// holding PageDown never blocks the UI thread.
+    /// True when the first page (the cover) is displayed alone in double-page
+    /// mode (Python's SHOW_DOUBLE_AS_ONE_TITLE for archives).
+    fn show_cover_alone(&self) -> bool {
+        self.state.prefs.virtual_double_page_for_fitting_images & SHOW_DOUBLE_AS_ONE_TITLE != 0
+            && self
+                .state
+                .path
+                .as_ref()
+                .map(|p| crate::archive::detect(p).is_some())
+                .unwrap_or(false)
+    }
+
+    /// True if `page` is shown on its own even in double-page mode (the cover
+    /// when the offset option is enabled).
+    fn is_virtual_single(&self, page: usize) -> bool {
+        is_virtual_single(page, self.show_cover_alone())
+    }
+
+    /// The pages displayed for `page` (1 page normally, 2 in double-page mode).
+    fn spread_for(&self, page: usize) -> Vec<usize> {
+        spread_of(
+            self.state.pages.len(),
+            page,
+            self.state.double_page,
+            self.show_cover_alone(),
+        )
+    }
+
+    /// The spread currently displayed.
+    fn current_spread(&self) -> Vec<usize> {
+        self.spread_for(self.state.page)
+    }
+
     fn request_pages(&mut self, dest: ScrollDest) {
         let n = self.state.pages.len();
         if n == 0 {
             return;
         }
-        let mut indices = vec![self.state.page];
-        if self.state.double_page && n > 1 {
-            indices.push((self.state.page + 1).min(n - 1));
+        let indices = self.current_spread();
+        if indices.is_empty() {
+            return;
         }
+        log::debug!(
+            "spread for page {}: {:?} (double_page={}, manga={})",
+            self.state.page + 1,
+            indices.iter().map(|i| i + 1).collect::<Vec<_>>(),
+            self.state.double_page,
+            self.state.manga
+        );
         self.state.page_dest = Some(dest);
         self.push_load(indices, true);
     }
@@ -1746,19 +1786,22 @@ impl Ui {
         self.state.sizes = vec![(0, 0), (0, 0)];
         self.state.lens_source = vec![None, None];
         self.state.lens_last_crop = None;
+        let spread = self.current_spread();
         for p in res.pages {
             let idx = p.idx;
-            // Record the FULL-RES size (redraw derives the zoomed display size
-            // from it) and the pre-built display texture.
-            if idx >= self.state.page && idx - self.state.page < 2 {
-                let slot = idx - self.state.page;
-                self.state.sizes[slot] = (p.full_w, p.full_h);
-                if let Some(img) = image::RgbaImage::from_raw(p.w, p.h, p.rgba.clone()) {
-                    let tex = image_loader::texture_from_rgba(&img);
-                    self.state.textures[slot] = Some((idx, p.w, p.h, tex));
-                }
-                if self.state.lens_enabled {
-                    self.state.lens_source[slot] = Some((p.full_w, p.full_h, p.full_rgba.clone()));
+            // Slot = position of the page within the current spread (0 = first
+            // page of the spread, 1 = its pair).
+            if let Some(slot) = spread.iter().position(|&sp| sp == idx) {
+                if slot < 2 {
+                    self.state.sizes[slot] = (p.full_w, p.full_h);
+                    if let Some(img) = image::RgbaImage::from_raw(p.w, p.h, p.rgba.clone()) {
+                        let tex = image_loader::texture_from_rgba(&img);
+                        self.state.textures[slot] = Some((idx, p.w, p.h, tex));
+                    }
+                    if self.state.lens_enabled {
+                        self.state.lens_source[slot] =
+                            Some((p.full_w, p.full_h, p.full_rgba.clone()));
+                    }
                 }
             }
             // Store full-res in the cache (revisits, zoom).
@@ -1864,18 +1907,16 @@ impl Ui {
         let vw = (alloc.width() as f64 - 4.0).max(50.0);
         let vh = (alloc.height() as f64 - 4.0).max(50.0);
 
-        let double = self.state.double_page && n > 1;
-        // Display order: in manga mode the current page sits on the right.
-        let order: Vec<usize> = if double {
-            if self.state.manga {
-                vec![1, 0]
-            } else {
-                vec![0, 1]
-            }
-        } else {
-            vec![0]
-        };
-        let slot_sizes: Vec<(u32, u32)> = order.iter().map(|&i| self.state.sizes[i]).collect();
+        // Pages of the current spread (slot 0 = first page of the spread).
+        let spread = self.current_spread();
+        let double = spread.len() > 1;
+        // Visual order (left to right). In manga mode the first page of the
+        // spread belongs on the RIGHT, so it is appended last; the content box
+        // stays LTR so the recorded geometry matches the screen.
+        let visual = visual_order(spread.len(), self.state.manga);
+        let slot_sizes: Vec<(u32, u32)> = (0..spread.len())
+            .map(|slot| self.state.sizes.get(slot).copied().unwrap_or((0, 0)))
+            .collect();
         let has_sizes = slot_sizes.iter().any(|s| s.0 > 0 && s.1 > 0);
         let zoomed = if has_sizes {
             self.state.zoom.zoomed_sizes(
@@ -1917,14 +1958,9 @@ impl Ui {
         // pre-scaled it to the current zoomed size for the freshly decoded
         // page; only zoom changes (or cache misses) fall back to scaling the
         // full-res image here on the UI thread.
-        let mut disp: Vec<(gdk::Texture, u32, u32)> = Vec::with_capacity(order.len());
-        for (slot, &i) in order.iter().enumerate() {
-            // The cache is keyed by PAGE index; `i` here is the display slot.
-            let page_idx = if i == 0 {
-                self.state.page
-            } else {
-                (self.state.page + 1).min(n - 1)
-            };
+        let mut disp: Vec<(gdk::Texture, u32, u32)> = Vec::with_capacity(spread.len());
+        for slot in 0..spread.len() {
+            let page_idx = spread[slot];
             let Some((w, h)) = zoomed.get(slot).copied() else {
                 disp.push((image_loader::texture_from_rgba(&image::RgbaImage::new(1, 1)), 1, 1));
                 continue;
@@ -1970,33 +2006,29 @@ impl Ui {
             }
         }
 
-        // Phase 2: apply to the widgets (no self borrows held).
-        for (slot, &i) in order.iter().enumerate() {
-            let pic = &self.pics[i];
+        // Phase 2: apply to the widgets (no self borrows held). Children are
+        // appended in visual order (left to right) and the box stays LTR, so
+        // the recorded positions match the on-screen layout.
+        for (vpos, &slot) in visual.iter().enumerate() {
+            let pic = &self.pics[vpos.min(self.pics.len() - 1)];
             let (tex, w, h) = &disp[slot];
             pic.set_paintable(Some(tex));
             pic.set_size_request(*w as i32, *h as i32);
             self.content.append(pic);
-            self.state.displayed[i] = (offset_x as i32, 0, *w as i32, *h as i32);
+            self.state.displayed[slot] = (offset_x as i32, 0, *w as i32, *h as i32);
             offset_x += *w as f64;
             total_w += *w as f64;
             total_h = total_h.max(*h as f64);
         }
         if double {
             offset_x += 2.0; // spacing between pages
-        }
-        if double {
-            total_w += 2.0; // spacing between pages
+            total_w += 2.0;
         }
         let (tw, th) = (total_w.max(1.0) as i32, total_h.max(1.0) as i32);
         self.content.set_size_request(tw, th);
         self.state.last_content = (tw, th);
         self.update_layout_position();
-        self.content.set_direction(if self.state.manga {
-            gtk::TextDirection::Rtl
-        } else {
-            gtk::TextDirection::Ltr
-        });
+        self.content.set_direction(gtk::TextDirection::Ltr);
         self.update_status();
     }
 
@@ -2146,12 +2178,20 @@ impl Ui {
         if count == 0 {
             return;
         }
-        let step = if self.state.double_page && self.state.prefs.double_step_in_double_page_mode {
-            2
-        } else {
-            1
-        };
-        let target = self.state.page as i32 + n * step;
+        // Double-page stepping, mirroring Python's flip_page(): in double
+        // page mode with the double step, an extra page is skipped unless the
+        // relevant page is displayed alone (e.g. the cover with the offset
+        // option enabled).
+        let double_step =
+            self.state.double_page && self.state.prefs.double_step_in_double_page_mode;
+        let magnitude = step_magnitude(
+            self.state.page,
+            n > 0,
+            double_step,
+            self.show_cover_alone(),
+            count,
+        );
+        let target = self.state.page as i32 + n * magnitude;
         if target >= count as i32 {
             if n > 0 {
                 self.next_book();
@@ -2159,8 +2199,13 @@ impl Ui {
             return;
         }
         if target < 0 {
-            if n < 0 {
+            // Only leave the book when we are already on the first page
+            // (mirrors Python's `current_page <= 1` check); otherwise clamp to
+            // the first page.
+            if n < 0 && self.state.page == 0 {
                 self.previous_book();
+            } else if n < 0 {
+                self.goto_index(0, ScrollDest::End);
             }
             return;
         }
@@ -2201,10 +2246,7 @@ impl Ui {
         self.refresh_thumb_wanted();
 
         // Fast path: the target page(s) are already decoded in the cache.
-        let mut visible = vec![idx];
-        if self.state.double_page && n > 1 {
-            visible.push((idx + 1).min(n - 1));
-        }
+        let visible = self.current_spread();
         if visible.iter().all(|i| self.state.cache.contains(i)) {
             // Populate sizes from the cache (redraw derives the zoomed
             // display textures from it).
@@ -4011,5 +4053,174 @@ fn apply_gtk_theme(window: &gtk::ApplicationWindow, prefs: &Prefs) {
         "dark" => window.add_css_class("mcomix-theme-dark"),
         "light" => window.add_css_class("mcomix-theme-light"),
         _ => {} // system: leave the OS default
+    }
+}
+
+/// True if `page` is displayed alone even in double-page mode: with the cover
+/// offset the first page is the title page (mirrors Python's
+/// `get_virtual_double_page` for SHOW_DOUBLE_AS_ONE_TITLE).
+pub fn is_virtual_single(page: usize, cover_alone: bool) -> bool {
+    cover_alone && page == 0
+}
+
+/// The pages of the spread shown for `page`. With the cover offset the first
+/// page is shown alone and the pairs start at the second page:
+/// `[0]`, `(1,2)`, `(3,4)`, ... ; otherwise the pairs are `(0,1)`, `(2,3)`, ...
+pub fn spread_of(n: usize, page: usize, double_page: bool, cover_alone: bool) -> Vec<usize> {
+    if n == 0 {
+        return Vec::new();
+    }
+    let page = page.min(n - 1);
+    if !double_page || n < 2 {
+        return vec![page];
+    }
+    if is_virtual_single(page, cover_alone) {
+        return vec![page];
+    }
+    let start = if cover_alone && page > 0 {
+        1 + ((page - 1) / 2) * 2
+    } else {
+        page
+    };
+    let mut v = vec![start];
+    if start + 1 < n {
+        v.push(start + 1);
+    }
+    v
+}
+
+/// Slot indices in visual (left to right) order: manga mode shows the first
+/// page of the spread on the right, Western on the left.
+pub fn visual_order(spread_len: usize, manga: bool) -> Vec<usize> {
+    if manga && spread_len > 1 {
+        (0..spread_len).rev().collect()
+    } else {
+        (0..spread_len).collect()
+    }
+}
+
+/// Magnitude of one page flip (1 or 2), mirroring Python's `flip_page`:
+/// in double-page mode with the double step an extra page is skipped, except
+/// when the relevant page is displayed alone (the cover offset).
+pub fn step_magnitude(
+    page: usize,
+    forward: bool,
+    double_step: bool,
+    cover_alone: bool,
+    n_pages: usize,
+) -> i32 {
+    if !double_step || n_pages == 0 {
+        return 1;
+    }
+    if forward {
+        if is_virtual_single(page, cover_alone) {
+            1
+        } else {
+            2
+        }
+    } else {
+        // Python checks the page *before* the target (1-based `new_page - 1`).
+        let target = page as isize - 1;
+        if target >= 1 && is_virtual_single((target - 1) as usize, cover_alone) {
+            1
+        } else {
+            2
+        }
+    }
+}
+
+/// `virtual double page for fitting images` bits (mirrors the Python
+/// constants): show the title page (cover) alone, or show wide pages alone.
+pub const SHOW_DOUBLE_AS_ONE_TITLE: i32 = 1;
+pub const SHOW_DOUBLE_AS_ONE_WIDE: i32 = 2;
+
+#[cfg(test)]
+mod spread_tests {
+    use super::*;
+
+    #[test]
+    fn spread_without_cover_offset() {
+        // Pairs are (0,1), (2,3), ...
+        assert_eq!(spread_of(10, 0, true, false), vec![0, 1]);
+        assert_eq!(spread_of(10, 1, true, false), vec![1, 2]);
+        assert_eq!(spread_of(10, 2, true, false), vec![2, 3]);
+        // Last page alone when it has no pair.
+        assert_eq!(spread_of(10, 9, true, false), vec![9]);
+        // Single page mode.
+        assert_eq!(spread_of(10, 4, false, false), vec![4]);
+        // No pages / single-page document.
+        assert!(spread_of(0, 0, true, false).is_empty());
+        assert_eq!(spread_of(1, 0, true, false), vec![0]);
+    }
+
+    #[test]
+    fn spread_with_cover_offset() {
+        // Cover alone, then (1,2), (3,4), ...
+        assert_eq!(spread_of(10, 0, true, true), vec![0]);
+        assert_eq!(spread_of(10, 1, true, true), vec![1, 2]);
+        assert_eq!(spread_of(10, 2, true, true), vec![1, 2]);
+        assert_eq!(spread_of(10, 3, true, true), vec![3, 4]);
+        assert_eq!(spread_of(10, 4, true, true), vec![3, 4]);
+        assert_eq!(spread_of(10, 5, true, true), vec![5, 6]);
+        // Last page has no pair.
+        assert_eq!(spread_of(10, 9, true, true), vec![9]);
+        assert_eq!(spread_of(6, 5, true, true), vec![5]);
+        // The offset applies only in double-page mode.
+        assert_eq!(spread_of(10, 0, false, true), vec![0]);
+        assert_eq!(spread_of(10, 3, false, true), vec![3]);
+    }
+
+    #[test]
+    fn stepping_without_cover_offset() {
+        // Plain double stepping visits the pair starts.
+        assert_eq!(step_magnitude(0, true, true, false, 10), 2);
+        assert_eq!(step_magnitude(2, true, true, false, 10), 2);
+        assert_eq!(step_magnitude(2, false, true, false, 10), 2);
+        // Single stepping when the preference is off.
+        assert_eq!(step_magnitude(0, true, false, false, 10), 1);
+        assert_eq!(step_magnitude(5, false, false, false, 10), 1);
+    }
+
+    #[test]
+    fn stepping_with_cover_offset() {
+        // Forward from the cover advances a single page (to the first pair).
+        assert_eq!(step_magnitude(0, true, true, true, 10), 1);
+        assert_eq!(step_magnitude(1, true, true, true, 10), 2);
+        assert_eq!(step_magnitude(3, true, true, true, 10), 2);
+        // Backward from the first pair lands on the cover.
+        assert_eq!(step_magnitude(1, false, true, true, 10), 2);
+        // Backward from the second pair lands on the first pair.
+        assert_eq!(step_magnitude(3, false, true, true, 10), 2);
+        assert_eq!(step_magnitude(5, false, true, true, 10), 2);
+    }
+
+    #[test]
+    fn visual_order_manga_puts_first_page_right() {
+        // Western: slot 0 (first page) left, slot 1 right.
+        assert_eq!(visual_order(2, false), vec![0, 1]);
+        // Manga: slot 1 appended first (left), slot 0 (first page) last = right.
+        assert_eq!(visual_order(2, true), vec![1, 0]);
+        // Single page: order is irrelevant.
+        assert_eq!(visual_order(1, true), vec![0]);
+        assert_eq!(visual_order(1, false), vec![0]);
+    }
+
+    #[test]
+    fn cover_offset_visits_every_pair() {
+        // Simulate forward navigation with the offset: 0, 1, 3, 5, 7, 9.
+        let n = 10;
+        let mut page = 0usize;
+        let mut visited = vec![page];
+        loop {
+            let mag = step_magnitude(page, true, true, true, n) as usize;
+            let next = page + mag;
+            if next >= n {
+                break;
+            }
+            page = next;
+            visited.push(page);
+            assert!(visited.len() < 20);
+        }
+        assert_eq!(visited, vec![0, 1, 3, 5, 7, 9]);
     }
 }
