@@ -74,6 +74,22 @@ list before debugging something that "should work".
 - Decoding/pre-scaling belongs to the worker; doing it in a signal handler or on
   the UI thread freezes the app (a 12 MP page costs ~700 ms decode + scale).
 
+## Windows bundle
+
+- A shipped 0.4.2 build failed on Windows with `libgcc_s_seh-1.dll not found`.
+  MSYS2 had turned `gcc-libs` into an empty stub (`size = 0`) depending on
+  `cc-libs` → `libgcc` + `libstdc++`; the script still listed only `gcc-libs` and
+  the bundler merely *warned* about the missing DLLs. Never trust a hand-written
+  package list: resolve `.PKGINFO` deps recursively and **fail the build** when
+  an import cannot be satisfied (`packaging/windows/cross-build-linux.sh`).
+- Bundling must also walk the **gdk-pixbuf loader** DLLs, not only the exe:
+  `pixbufloader_svg.dll` needs `librsvg-2-2.dll`.
+- Windows DLL names are case-insensitive but Linux paths are not: `libLerc.dll`
+  satisfies an import of `liblerc.dll`. Compare lowercased when auditing.
+- Antivirus/SmartScreen false positives come with the territory for unsigned
+  MinGW binaries and NSIS installers; the installer installs per user (no UAC)
+  and the release publishes `.sha256` files. Code signing is the real remedy.
+
 ## Toolbar overflow
 
 - Deciding "does it fit?" from the *live* natural width oscillates: hiding a
