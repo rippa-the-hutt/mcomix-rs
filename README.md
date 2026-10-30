@@ -58,9 +58,33 @@ installed alongside the original Python `mcomix3` package.
 ### Windows
 
 - **Portable zip** — no-install folder with the `.exe` and all bundled DLLs/data.
-- **Installer** — NSIS `mcomix-rs-setup-<ver>.exe`.
+- **Installer** — NSIS `mcomix-rs-setup-<ver>.exe`. It installs **per user**
+  (`%LOCALAPPDATA%\Programs\MComix-rs`) and does not require administrator
+  rights.
 
-Both are produced from the GitHub [Releases](https://github.com/rippa-the-hutt/mcomix-rs/releases) workflow (MSYS2/MINGW64 build).
+Both are produced by the GitHub
+[Releases](https://github.com/rippa-the-hutt/mcomix-rs/releases) workflow
+(cross-compiled with MinGW-w64 on a Linux runner) and ship as `.zip`/`.exe` plus
+a matching `.sha256` checksum.
+
+#### Antivirus / SmartScreen
+
+The executables are **not code-signed**, and Windows treats unsigned binaries
+from small projects with suspicion: SmartScreen may warn about the download, and
+some antivirus engines flag NSIS installers and freshly cross-compiled (MinGW)
+binaries heuristically. If that happens:
+
+1. Prefer the **portable zip** — unpack it and run `mcomix-rs.exe`; there is
+   nothing to install and no elevation involved.
+2. Verify the download against the published checksum:
+   `certutil -hashfile mcomix-rs-<ver>-windows-x86_64.zip SHA256`, and compare it
+   with the bundled `.sha256` file from the release.
+3. If your antivirus quarantines a file it is a **false positive** — please
+   report it to the vendor (and open an issue) so the signature can be
+   corrected. Adding an exclusion for the folder also works.
+
+Code signing is the definitive fix and may be added once a certificate is
+available.
 
 ## Building from source
 

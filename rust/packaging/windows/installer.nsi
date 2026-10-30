@@ -17,10 +17,23 @@
 
 Name "${APPNAME} ${VERSION}"
 OutFile "${OUTFILE}"
-InstallDir "$PROGRAMFILES64\${APPNAME}"
-InstallDirRegKey HKLM "${REGKEY}" "InstallDir"
-RequestExecutionLevel admin
+; Per-user install: no elevation (no UAC prompt) and no writes outside the
+; user profile. Locked-down machines aside, this also avoids one of the
+; heuristics that makes antivirus/SmartScreen flag unsigned NSIS installers
+; that request admin rights.
+InstallDir "$LOCALAPPDATA\Programs\${APPNAME}"
+InstallDirRegKey HKCU "${REGKEY}" "InstallDir"
+RequestExecutionLevel user
 SetCompressor /SOLID lzma
+
+; Version metadata for the installer itself (Explorer "Details" tab).
+VIProductVersion "${VERSION}.0"
+VIAddVersionKey "ProductName" "${APPNAME}"
+VIAddVersionKey "FileDescription" "${APPNAME} installer"
+VIAddVersionKey "FileVersion" "${VERSION}"
+VIAddVersionKey "ProductVersion" "${VERSION}"
+VIAddVersionKey "LegalCopyright" "GPL-2.0-or-later"
+VIAddVersionKey "CompanyName" "Rippa The Hutt"
 
 Page directory
 Page instfiles
@@ -38,15 +51,17 @@ Section "Install"
 
     ; Uninstaller
     WriteUninstaller "$INSTDIR\uninstall.exe"
-    WriteRegStr HKLM "${REGKEY}" "InstallDir" "$INSTDIR"
-    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" \
+    WriteRegStr HKCU "${REGKEY}" "InstallDir" "$INSTDIR"
+    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" \
         "DisplayName" "${APPNAME}"
-    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" \
+    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" \
         "UninstallString" "$INSTDIR\uninstall.exe"
-    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" \
+    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" \
         "DisplayVersion" "${VERSION}"
-    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" \
+    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" \
         "Publisher" "Rippa The Hutt"
+    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" \
+        "DisplayIcon" "$INSTDIR\${BIN}"
 SectionEnd
 
 Section "Uninstall"
@@ -55,6 +70,6 @@ Section "Uninstall"
     Delete "$SMPROGRAMS\${APPNAME}\${APPNAME}.lnk"
     Delete "$SMPROGRAMS\${APPNAME}\Uninstall.lnk"
     RMDir "$SMPROGRAMS\${APPNAME}"
-    DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}"
-    DeleteRegKey HKLM "${REGKEY}"
+    DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}"
+    DeleteRegKey HKCU "${REGKEY}"
 SectionEnd

@@ -24,6 +24,24 @@ be run locally.
   must point at the extracted tree. The bundler walks DLL imports and skips
   Windows system DLLs. GStreamer DLLs **must** be bundled (`libgtk-4-1.dll`
   hard-imports them) — a missing one means the app will not start on Windows.
+  - **The `PACKAGES` list is only a seed.** The closure is resolved recursively
+    from each package's `.PKGINFO`, because MSYS2 turns split packages into empty
+    stubs: `gcc-libs` (no files) → `cc-libs` (no files) → `libgcc` (holds
+    `libgcc_s_seh-1.dll`) + `libstdc++` (holds `libstdc++-6.dll`). Release 0.4.2
+    shipped without those two DLLs and would not start on Windows
+    ("libgcc_s_seh-1.dll not found").
+  - Names containing `+` (`libstdc++`) are **URL-encoded in the mirror listing**
+    (`libstdc%2B%2B`); `pkg_file()` encodes them before searching.
+  - The bundler walks the imports of the exe **and of the gdk-pixbuf loaders**
+    (the SVG loader needs `librsvg-2-2.dll`), and a verification step **fails the
+    build** if any non-system import is unresolved. Never publish a bundle if that
+    check reports something.
+- **Windows installer** is per-user (`RequestExecutionLevel user`, installs into
+  `%LOCALAPPDATA%\Programs\MComix-rs`, HKCU registry) and carries version
+  metadata — fewer UAC/antivirus/SmartScreen heuristics than an admin NSIS
+  installer. The real fix for AV reputation is code signing; until then the
+  release ships `.sha256` files next to the artifacts and the README explains
+  the false-positive routine.
 - **Icons**: app icon `mcomix-rs.png`, mimetype icons
   `application-x-mcomix-cb{z,r,t}.png` — deliberately distinct from the Python
   `mcomix3` package's files so both can be installed side by side.

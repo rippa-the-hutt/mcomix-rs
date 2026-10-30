@@ -101,7 +101,9 @@ jobs:
           name: windows
           path: |
             rust/dist/*.zip
+            rust/dist/*.zip.sha256
             rust/dist/*.exe
+            rust/dist/*.exe.sha256
 
   release:
     name: Publish GitHub Release
